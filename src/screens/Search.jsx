@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { IconSearch, IconStar } from '../components/Icons'
+import { IconSearch, IconStar, IconWrench, IconBriefcase, IconLocation } from '../components/Icons'
 
-const AVA_COLORS = ['#3A6BA8', '#2E7D52', '#8B5E1A', '#5B3EA6', '#8B2020', '#1A6B6B']
+const AVA_COLORS = ['#3A6BA8', '#2E7D52', '#8B5E1A', '#5B3EA6', '#7A3030', '#1A6B6B', '#4A6B1A', '#6B1A5B']
 const avaColor = (name) => AVA_COLORS[(name?.charCodeAt(0) || 0) % AVA_COLORS.length]
 const initials = (name) => (name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()
 
@@ -10,40 +10,31 @@ export default function Search({ onOpenProfile }) {
   const [query, setQuery] = useState('')
   const [dzoFilter, setDzoFilter] = useState('')
   const [dzoList, setDzoList] = useState([])
-  const [results, setResults] = useState(null)
+  const [results, setResults] = useState([])
+  const [counts, setCounts] = useState({}) // id → post count
+  const [loading, setLoading] = useState(false)
 
-  // collect distinct DZOs for filter tabs
   useEffect(() => {
-    supabase.from('profiles').select('dzo').not('dzo', 'is', null)
-      .then(({ data }) => {
-        const uniq = [...new Set((data || []).map(d => d.dzo))].sort()
-        setDzoList(uniq)
-      })
+    supabase.from('dzo_list').select('name').order('sort')
+      .then(({ data }) => setDzoList((data || []).map(d => d.name)))
   }, [])
 
   useEffect(() => {
     const t = setTimeout(async () => {
-      let q = supabase.from('profiles').select('*').limit(40)
+      setLoading(true)
+      let q = supabase.from('profiles').select('*').limit(50).order('full_name')
       if (dzoFilter) q = q.eq('dzo', dzoFilter)
       if (query.trim()) {
         const w = query.trim()
-        // имя ИЛИ специальность ИЛИ навык ИЛИ оборудование
         q = q.or(`full_name.ilike.%${w}%,specialty.ilike.%${w}%,position.ilike.%${w}%`)
       }
-      const { data } = await q
-      let rows = data || []
-      // дополнительный поиск по массивам skills/equipment на клиенте
+      const { data: rows } = await q
+      let list = rows || []
+
+      // Дополнительный поиск по навыкам/оборудованию на клиенте
       if (query.trim()) {
         const w = query.trim().toLowerCase()
-        const { data: bySkill } = await supabase.from('profiles').select('*')
-          .or(`skills.cs.{${query.trim()}},equipment.cs.{${query.trim()}}`)
-          .limit(40)
-        const seen = new Set(rows.map(r => r.id))
-        for (const r of bySkill || []) {
-          if (!seen.has(r.id) && (!dzoFilter || r.dzo === dzoFilter)) rows.push(r)
-        }
-        // и частичное совпадение в массивах
-        rows = rows.filter(r =>
+        list = list.filter(r =>
           r.full_name?.toLowerCase().includes(w) ||
           r.specialty?.toLowerCase().includes(w) ||
           r.position?.toLowerCase().includes(w) ||
@@ -51,59 +42,110 @@ export default function Search({ onOpenProfile }) {
           (r.equipment || []).some(s => s.toLowerCase().includes(w))
         )
       }
-      setResults(rows)
+
+      setResults(list)
+
+      // Считаем публикации для каждого
+      if (list.length > 0) {
+        const ids = list.map(r => r.id)
+        const { data: postData } = await supabase
+          .from('posts').select('author_id')
+          .in('author_id', ids)
+        const cnt = {}
+        for (const p of postData || []) cnt[p.author_id] = (cnt[p.author_id] || 0) + 1
+        setCounts(cnt)
+      }
+      setLoading(false)
     }, 300)
     return () => clearTimeout(t)
   }, [query, dzoFilter])
+
+  const dzoShort = (dzo) => dzo?.replace(/^(АО|ТОО|СП|ДП)\s*[«"]?/i, '').replace(/[»"]/g, '').trim() || dzo
 
   return (
     <>
       <div className="search-wrap">
         <div className="search-field">
-          <IconSearch size={17} />
+          <IconSearch size={17} color="var(--text3)" />
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Имя, специальность, навык, оборудование..."
+            autoComplete="off"
           />
+          {query && (
+            <button style={{background:'none',border:'none',color:'var(--text3)',cursor:'pointer',padding:0}}
+              onClick={() => setQuery('')}>✕</button>
+          )}
         </div>
       </div>
 
       <div className="tabs">
         <button className={`tab ${!dzoFilter?'active':''}`} onClick={() => setDzoFilter('')}>Все ДЗО</button>
         {dzoList.map(d => (
-          <button key={d} className={`tab ${dzoFilter===d?'active':''}`} onClick={() => setDzoFilter(d)}>{d}</button>
+          <button key={d} className={`tab ${dzoFilter===d?'active':''}`}
+            onClick={() => setDzoFilter(dzoFilter===d ? '' : d)}>
+            {dzoShort(d)}
+          </button>
         ))}
       </div>
 
-      {results === null && <div className="spinner" />}
-      {results?.length === 0 && (
-        <div className="empty">Никого не нашли.<br />Попробуйте другой запрос.</div>
+      {loading && <div className="spinner" />}
+
+      {!loading && results.length === 0 && (
+        <div className="empty-state">
+          <div className="empty-icon">🔍</div>
+          <div className="empty-title">
+            {query || dzoFilter ? 'Никого не нашли' : 'Найдите эксперта'}
+          </div>
+          <div className="empty-sub">
+            {query || dzoFilter
+              ? 'Попробуйте другой запрос или уберите фильтр по ДЗО'
+              : 'Введите имя, специальность или название оборудования'}
+          </div>
+        </div>
       )}
 
-      {results?.length > 0 && (
-        <div className="div-label">Найдено: {results.length}</div>
+      {!loading && results.length > 0 && (
+        <div className="div-label">Найдено {results.length} специалистов</div>
       )}
 
-      {results?.map(p => (
+      {results.map(p => (
         <div className="expert" key={p.id} onClick={() => onOpenProfile(p.id)}>
-          <div className="ava" style={{ background: avaColor(p.full_name), width: 44, height: 44 }}>
+          <div className="ava" style={{ background: avaColor(p.full_name), width: 46, height: 46, fontSize: 15 }}>
             {initials(p.full_name)}
           </div>
           <div className="exp-info">
             <div className="exp-name">
               {p.full_name}
-              {p.is_expert && <IconStar size={13} active color="var(--gold)" style={{marginLeft:5}} />}
+              {p.is_expert && <IconStar size={13} active color="var(--gold)" />}
             </div>
-            <div className="exp-role">
-              {[p.specialty || p.position, p.dzo, p.region].filter(Boolean).join(' · ')}
+            <div className="exp-meta-row">
+              {p.specialty && (
+                <span className="exp-meta-item">
+                  <IconBriefcase size={11} color="var(--text3)" />
+                  {p.specialty}
+                </span>
+              )}
+              {p.dzo && (
+                <span className="exp-meta-item">
+                  <IconLocation size={11} color="var(--text3)" />
+                  {dzoShort(p.dzo)}
+                </span>
+              )}
             </div>
-            {(p.skills?.length > 0) && (
+            {p.skills?.length > 0 && (
               <div className="exp-chips">
                 {p.skills.slice(0, 4).map(s => <span className="exp-chip" key={s}>{s}</span>)}
               </div>
             )}
           </div>
+          {counts[p.id] > 0 && (
+            <div className="exp-right">
+              <div className="exp-stat-val">{counts[p.id]}</div>
+              <div className="exp-stat-key">публ.</div>
+            </div>
+          )}
         </div>
       ))}
     </>
