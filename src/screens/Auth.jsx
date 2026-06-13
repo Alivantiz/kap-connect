@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { Logo } from '../components/Icons'
 
 export default function Auth() {
-  const [mode, setMode] = useState('signin') // signin | signup
+  const [mode, setMode] = useState('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [password2, setPassword2] = useState('')
@@ -17,7 +17,6 @@ export default function Auth() {
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
 
-  // список ДЗО из БД (доступен анонимно)
   useEffect(() => {
     supabase.from('dzo_list').select('name').order('sort')
       .then(({ data }) => setDzoList((data || []).map(d => d.name)))
@@ -38,7 +37,6 @@ export default function Auth() {
         const full_name = [lastName, firstName, middleName]
           .map(s => s.trim()).filter(Boolean).join(' ')
 
-        // Профиль создаст триггер в БД из metadata
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -46,7 +44,6 @@ export default function Auth() {
         })
         if (error) throw error
 
-        // Если включено подтверждение email — сессии не будет
         if (!data.session) {
           setInfo('Аккаунт создан. Проверьте почту и подтвердите email, затем войдите.')
           setMode('signin')
@@ -62,6 +59,8 @@ export default function Auth() {
     setLoading(false)
   }
 
+  const switchMode = (m) => { setMode(m); setError(''); setInfo(''); }
+
   return (
     <div className="auth-wrap">
       <div className="auth-logo">
@@ -74,62 +73,118 @@ export default function Auth() {
       </div>
 
       {error && <div className="auth-error">{error}</div>}
-      {info && <div className="auth-error" style={{
-        background:'rgba(61,190,122,0.12)',
-        borderColor:'rgba(61,190,122,0.3)',
-        color:'var(--green)'}}>{info}</div>}
+      {info && (
+        <div className="auth-error" style={{
+          background: 'rgba(61,190,122,0.12)',
+          borderColor: 'rgba(61,190,122,0.3)',
+          color: 'var(--green)'
+        }}>{info}</div>
+      )}
 
       {mode === 'signup' && (
         <>
           <div className="field">
             <label>Фамилия</label>
-            <input value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Ибрагимов" />
+            <input
+              value={lastName}
+              onChange={e => setLastName(e.target.value)}
+              placeholder="Фамилия"
+              autoComplete="family-name"
+            />
           </div>
           <div className="field">
             <label>Имя</label>
-            <input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="Руслан" />
+            <input
+              value={firstName}
+              onChange={e => setFirstName(e.target.value)}
+              placeholder="Имя"
+              autoComplete="given-name"
+            />
           </div>
           <div className="field">
-            <label>Отчество <span style={{fontWeight:400, textTransform:'none'}}>(необязательно)</span></label>
-            <input value={middleName} onChange={e => setMiddleName(e.target.value)} placeholder="Маратулы" />
+            <label>
+              Отчество{' '}
+              <span style={{fontWeight:400, textTransform:'none', color:'var(--text3)'}}>
+                (необязательно)
+              </span>
+            </label>
+            <input
+              value={middleName}
+              onChange={e => setMiddleName(e.target.value)}
+              placeholder="Отчество"
+              autoComplete="additional-name"
+            />
           </div>
           <div className="field">
             <label>ДЗО</label>
             <select value={dzo} onChange={e => setDzo(e.target.value)}>
-              <option value="">— выберите —</option>
+              <option value="">— выберите ДЗО —</option>
               {dzoList.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
           <div className="field">
-            <label>Специальность</label>
-            <input value={specialty} onChange={e => setSpecialty(e.target.value)} placeholder="Инженер связи, КИПиА, буровик..." />
+            <label>
+              Специальность{' '}
+              <span style={{fontWeight:400, textTransform:'none', color:'var(--text3)'}}>
+                (необязательно)
+              </span>
+            </label>
+            <input
+              value={specialty}
+              onChange={e => setSpecialty(e.target.value)}
+              placeholder="Например: КИПиА, буровик, механик"
+            />
           </div>
         </>
       )}
 
       <div className="field">
         <label>Email</label>
-        <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@mail.kz" />
+        <input
+          type="email"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          placeholder="Email"
+          autoComplete="email"
+        />
       </div>
       <div className="field">
         <label>Пароль</label>
-        <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="минимум 6 символов" />
+        <input
+          type="password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          placeholder="Минимум 6 символов"
+          autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+        />
       </div>
       {mode === 'signup' && (
         <div className="field">
           <label>Подтверждение пароля</label>
-          <input type="password" value={password2} onChange={e => setPassword2(e.target.value)} placeholder="ещё раз" />
+          <input
+            type="password"
+            value={password2}
+            onChange={e => setPassword2(e.target.value)}
+            placeholder="Повторите пароль"
+            autoComplete="new-password"
+          />
         </div>
       )}
 
-      <button className="btn-primary" style={{margin:'8px 0 0', width:'100%'}} disabled={loading} onClick={submit}>
+      <button
+        className="btn-primary"
+        style={{margin: '8px 0 0', width: '100%'}}
+        disabled={loading}
+        onClick={submit}
+      >
         {loading ? '...' : mode === 'signin' ? 'Войти' : 'Создать аккаунт'}
       </button>
 
       <div className="auth-switch">
         {mode === 'signin'
-          ? <>Нет аккаунта? <span onClick={() => { setMode('signup'); setError(''); setInfo('') }}>Зарегистрироваться</span></>
-          : <>Уже есть аккаунт? <span onClick={() => { setMode('signin'); setError(''); setInfo('') }}>Войти</span></>}
+          ? <>Нет аккаунта? <span onClick={() => switchMode('signup')}>Зарегистрироваться</span></>
+          : <>Уже есть аккаунт? <span onClick={() => switchMode('signin')}>Войти</span></>
+        }
       </div>
     </div>
   )
