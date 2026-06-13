@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './lib/supabase'
-import { Logo, IconFeed, IconSearch, IconGroups, IconProfile, IconPlus } from './components/Icons'
+import { Logo, IconFeed, IconSearch, IconGroups, IconProfile, IconPlus, IconBell } from './components/Icons'
 import Auth from './screens/Auth'
 import Feed from './screens/Feed'
 import Search from './screens/Search'
@@ -8,19 +8,21 @@ import Communities from './screens/Communities'
 import Profile from './screens/Profile'
 import NewPost from './components/NewPost'
 
+const AVA_COLORS = ['#3A6BA8', '#2E7D52', '#8B5E1A', '#5B3EA6', '#7A3030', '#1A6B6B', '#4A6B1A', '#6B1A5B']
+const avaColor = (name) => AVA_COLORS[(name?.charCodeAt(0) || 0) % AVA_COLORS.length]
+const initials = (name) => (name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()
+
 export default function App() {
-  const [session, setSession] = useState(undefined) // undefined = loading
+  const [session, setSession] = useState(undefined)
   const [myProfile, setMyProfile] = useState(null)
   const [tab, setTab] = useState('feed')
-  const [viewProfileId, setViewProfileId] = useState(null) // чужой профиль
+  const [viewProfileId, setViewProfileId] = useState(null)
   const [showNewPost, setShowNewPost] = useState(false)
-  const [feedKey, setFeedKey] = useState(0) // для перезагрузки ленты
+  const [feedKey, setFeedKey] = useState(0)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_e, session) => setSession(session)
-    )
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => setSession(session))
     return () => subscription.unsubscribe()
   }, [])
 
@@ -30,52 +32,57 @@ export default function App() {
       .then(({ data }) => setMyProfile(data))
   }, [session])
 
-  if (session === undefined) return <div className="spinner" />
+  if (session === undefined) return (
+    <div style={{minHeight:'100dvh',display:'flex',alignItems:'center',justifyContent:'center',background:'var(--bg)'}}>
+      <div className="spinner" />
+    </div>
+  )
   if (!session) return <Auth />
 
-  const openProfile = (id) => {
-    setViewProfileId(id)
-    setTab('profile')
-  }
-
-  const goTab = (t) => {
-    setViewProfileId(null)
-    setTab(t)
-  }
+  const openProfile = (id) => { setViewProfileId(id); setTab('profile') }
+  const goTab = (t) => { setViewProfileId(null); setTab(t) }
+  const isProfileSelf = tab === 'profile' && !viewProfileId
 
   return (
     <div className="app">
-      <div className="topbar">
+      <header className="topbar">
         <div className="topbar-logo">
-          <Logo size={26} />
+          <Logo size={24} />
           KAP<span className="dot">.</span>Connect
         </div>
-      </div>
+        <div className="topbar-actions">
+          {myProfile && (
+            <div
+              className="ava topbar-ava"
+              style={{ background: avaColor(myProfile.full_name) }}
+              onClick={() => goTab('profile')}
+            >
+              {initials(myProfile.full_name)}
+            </div>
+          )}
+        </div>
+      </header>
 
-      <div className="content">
+      <main className="content">
         {tab === 'feed' && (
           <Feed key={feedKey} myId={session.user.id} onOpenProfile={openProfile} />
         )}
-        {tab === 'search' && (
-          <Search onOpenProfile={openProfile} />
-        )}
-        {tab === 'communities' && (
-          <Communities myId={session.user.id} />
-        )}
+        {tab === 'search' && <Search onOpenProfile={openProfile} />}
+        {tab === 'communities' && <Communities myId={session.user.id} />}
         {tab === 'profile' && (
           <Profile
             profileId={viewProfileId || session.user.id}
             isMe={!viewProfileId || viewProfileId === session.user.id}
             onBack={viewProfileId ? () => { setViewProfileId(null); setTab('feed') } : null}
             myProfile={myProfile}
-            onProfileSaved={setMyProfile}
+            onProfileSaved={p => { setMyProfile(p); }}
           />
         )}
-      </div>
+      </main>
 
-      {(tab === 'feed') && (
-        <button className="fab" onClick={() => setShowNewPost(true)}>
-          <IconPlus size={24} />
+      {tab === 'feed' && (
+        <button className="fab" onClick={() => setShowNewPost(true)} aria-label="Новая публикация">
+          <IconPlus size={22} />
         </button>
       )}
 
@@ -88,22 +95,21 @@ export default function App() {
       )}
 
       <nav className="bottom-nav">
-        <button className={`bnav ${tab==='feed'?'active':''}`} onClick={() => goTab('feed')}>
-          <IconFeed size={22} />
-          <span>Лента</span>
-        </button>
-        <button className={`bnav ${tab==='search'?'active':''}`} onClick={() => goTab('search')}>
-          <IconSearch size={22} />
-          <span>Поиск</span>
-        </button>
-        <button className={`bnav ${tab==='communities'?'active':''}`} onClick={() => goTab('communities')}>
-          <IconGroups size={22} />
-          <span>Группы</span>
-        </button>
-        <button className={`bnav ${tab==='profile'&&!viewProfileId?'active':''}`} onClick={() => goTab('profile')}>
-          <IconProfile size={22} />
-          <span>Профиль</span>
-        </button>
+        {[
+          { id: 'feed',        label: 'Лента',   Icon: IconFeed },
+          { id: 'search',      label: 'Поиск',   Icon: IconSearch },
+          { id: 'communities', label: 'Группы',  Icon: IconGroups },
+          { id: 'profile',     label: 'Профиль', Icon: IconProfile, selfOnly: true },
+        ].map(({ id, label, Icon, selfOnly }) => (
+          <button
+            key={id}
+            className={`bnav ${tab===id && (selfOnly ? !viewProfileId : true) ? 'active' : ''}`}
+            onClick={() => goTab(id)}
+          >
+            <Icon size={22} />
+            <span>{label}</span>
+          </button>
+        ))}
       </nav>
     </div>
   )
