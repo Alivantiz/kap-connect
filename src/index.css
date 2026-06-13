@@ -747,3 +747,98 @@ body {
   background-position: right 14px center;
   padding-right: 36px;
 }
+
+/* Communities topbar */
+.comm-topbar {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-right: 8px;
+}
+.comm-topbar::-webkit-scrollbar { display: none; }
+
+.create-comm-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 13px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+.create-comm-btn:active { opacity: .85; }
+
+/* Owner badge */
+.owner-badge {
+  margin-left: 7px;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 7px;
+  background: rgba(74,144,217,0.15);
+  color: var(--accent);
+  border-radius: 5px;
+  vertical-align: middle;
+}
+
+/* Comm action buttons */
+.comm-action-btn {
+  width: 28px; height: 28px;
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+}
+.comm-action-btn:active { background: var(--surface3); }
+
+/* Emoji picker */
+.emoji-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.emoji-opt {
+  width: 38px; height: 38px;
+  border-radius: 9px;
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all .12s;
+}
+.emoji-opt.sel {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* Toggle switch */
+.toggle {
+  width: 40px; height: 22px;
+  background: var(--border2);
+  border-radius: 11px;
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .2s;
+}
+.toggle.on { background: var(--accent); }
+.toggle-thumb {
+  width: 16px; height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  position: absolute;
+  top: 3px; left: 3px;
+  transition: transform .2s;
+}
+.toggle.on .toggle-thumb { transform: translateX(18px); }
