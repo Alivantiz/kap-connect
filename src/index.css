@@ -842,3 +842,24 @@ body {
   transition: transform .2s;
 }
 .toggle.on .toggle-thumb { transform: translateX(18px); }
+/* Profile meta row */
+.profile-dzo-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.profile-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text3);
+}
+
+/* Skill with icon */
+.skill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
