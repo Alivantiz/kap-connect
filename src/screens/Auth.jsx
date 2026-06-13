@@ -1,44 +1,63 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { Logo } from '../components/Icons'
-
-const DZO_LIST = ['Орталык', 'Инкай', 'Байкен-У', 'Катко', 'Каратау', 'РУ-6', 'Аппак', 'СП Заречное', 'Семизбай-U', 'Головной офис', 'Другое']
 
 export default function Auth() {
   const [mode, setMode] = useState('signin') // signin | signup
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [fullName, setFullName] = useState('')
+  const [password2, setPassword2] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [firstName, setFirstName] = useState('')
+  const [middleName, setMiddleName] = useState('')
   const [dzo, setDzo] = useState('')
   const [specialty, setSpecialty] = useState('')
+  const [dzoList, setDzoList] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
+
+  // список ДЗО из БД (доступен анонимно)
+  useEffect(() => {
+    supabase.from('dzo_list').select('name').order('sort')
+      .then(({ data }) => setDzoList((data || []).map(d => d.name)))
+  }, [])
 
   const submit = async () => {
-    setError('')
+    setError(''); setInfo('')
     setLoading(true)
     try {
       if (mode === 'signin') {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
       } else {
-        if (!fullName.trim()) throw new Error('Укажите имя и фамилию')
-        const { data, error } = await supabase.auth.signUp({ email, password })
+        if (!lastName.trim() || !firstName.trim()) throw new Error('Укажите фамилию и имя')
+        if (password.length < 6) throw new Error('Пароль минимум 6 символов')
+        if (password !== password2) throw new Error('Пароли не совпадают')
+
+        const full_name = [lastName, firstName, middleName]
+          .map(s => s.trim()).filter(Boolean).join(' ')
+
+        // Профиль создаст триггер в БД из metadata
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { full_name, dzo, specialty: specialty.trim() } },
+        })
         if (error) throw error
-        if (data.user) {
-          const { error: pErr } = await supabase.from('profiles').insert({
-            id: data.user.id,
-            full_name: fullName.trim(),
-            dzo: dzo || null,
-            specialty: specialty.trim() || null,
-          })
-          if (pErr) throw pErr
+
+        // Если включено подтверждение email — сессии не будет
+        if (!data.session) {
+          setInfo('Аккаунт создан. Проверьте почту и подтвердите email, затем войдите.')
+          setMode('signin')
         }
       }
     } catch (e) {
-      setError(e.message === 'Invalid login credentials'
-        ? 'Неверный email или пароль'
-        : e.message)
+      setError(
+        e.message === 'Invalid login credentials' ? 'Неверный email или пароль'
+        : e.message === 'User already registered' ? 'Этот email уже зарегистрирован'
+        : e.message
+      )
     }
     setLoading(false)
   }
@@ -55,23 +74,35 @@ export default function Auth() {
       </div>
 
       {error && <div className="auth-error">{error}</div>}
+      {info && <div className="auth-error" style={{
+        background:'rgba(61,190,122,0.12)',
+        borderColor:'rgba(61,190,122,0.3)',
+        color:'var(--green)'}}>{info}</div>}
 
       {mode === 'signup' && (
         <>
           <div className="field">
-            <label>Имя и фамилия</label>
-            <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Аскар Сулейменов" />
+            <label>Фамилия</label>
+            <input value={lastName} onChange={e => setLastName(e.target.value)} placeholder="Ибрагимов" />
+          </div>
+          <div className="field">
+            <label>Имя</label>
+            <input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="Руслан" />
+          </div>
+          <div className="field">
+            <label>Отчество <span style={{fontWeight:400, textTransform:'none'}}>(необязательно)</span></label>
+            <input value={middleName} onChange={e => setMiddleName(e.target.value)} placeholder="Маратулы" />
           </div>
           <div className="field">
             <label>ДЗО</label>
             <select value={dzo} onChange={e => setDzo(e.target.value)}>
               <option value="">— выберите —</option>
-              {DZO_LIST.map(d => <option key={d} value={d}>{d}</option>)}
+              {dzoList.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </div>
           <div className="field">
             <label>Специальность</label>
-            <input value={specialty} onChange={e => setSpecialty(e.target.value)} placeholder="КИПиА, буровик, механик..." />
+            <input value={specialty} onChange={e => setSpecialty(e.target.value)} placeholder="Инженер связи, КИПиА, буровик..." />
           </div>
         </>
       )}
@@ -84,6 +115,12 @@ export default function Auth() {
         <label>Пароль</label>
         <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="минимум 6 символов" />
       </div>
+      {mode === 'signup' && (
+        <div className="field">
+          <label>Подтверждение пароля</label>
+          <input type="password" value={password2} onChange={e => setPassword2(e.target.value)} placeholder="ещё раз" />
+        </div>
+      )}
 
       <button className="btn-primary" style={{margin:'8px 0 0', width:'100%'}} disabled={loading} onClick={submit}>
         {loading ? '...' : mode === 'signin' ? 'Войти' : 'Создать аккаунт'}
@@ -91,8 +128,8 @@ export default function Auth() {
 
       <div className="auth-switch">
         {mode === 'signin'
-          ? <>Нет аккаунта? <span onClick={() => setMode('signup')}>Зарегистрироваться</span></>
-          : <>Уже есть аккаунт? <span onClick={() => setMode('signin')}>Войти</span></>}
+          ? <>Нет аккаунта? <span onClick={() => { setMode('signup'); setError(''); setInfo('') }}>Зарегистрироваться</span></>
+          : <>Уже есть аккаунт? <span onClick={() => { setMode('signin'); setError(''); setInfo('') }}>Войти</span></>}
       </div>
     </div>
   )
