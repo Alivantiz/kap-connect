@@ -90,7 +90,7 @@ describe('Лента', () => {
     const { user } = view()
     await screen.findByText('Замена уплотнения насоса ГрАТ')
 
-    await user.click(screen.getByRole('tab', { name: 'Вопросы' }))
+    await user.click(screen.getByRole('button', { name: 'Вопросы' }))
 
     await waitFor(() =>
       expect(db.listFeed).toHaveBeenCalledWith(expect.objectContaining({ filter: 'questions' })),
@@ -109,7 +109,7 @@ describe('Лента', () => {
     )
     await screen.findByText('Замена уплотнения насоса ГрАТ')
 
-    await user.click(screen.getByRole('tab', { name: 'Моё ДЗО' }))
+    await user.click(screen.getByRole('button', { name: 'Моё ДЗО' }))
 
     // Раньше фильтр молча показывал всю ленту компании под заголовком «Моё ДЗО».
     expect(onNeedProfile).toHaveBeenCalled()

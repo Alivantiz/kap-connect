@@ -4,15 +4,27 @@ import { useId } from 'react'
  * Поле формы с настоящим <label for>. Раньше label не был связан с input,
  * поэтому по подписи нельзя было попасть в поле, а скринридер её не читал.
  */
-export function Field({ label, hint, error, children, required }) {
+export function Field({ label, hint, error, children, required, group = false }) {
   const id = useId()
   const describedBy = [hint && `${id}-hint`, error && `${id}-err`].filter(Boolean).join(' ')
+  // Для набора кнопок (тип публикации, знак сообщества) нельзя использовать
+  // <label for>: подпись указывала бы на элемент, которого нет. Такой блок
+  // объявляется группой и связывается с подписью через aria-labelledby.
+  const Wrapper = group ? 'div' : 'label'
   return (
-    <div className={`field ${error ? 'field-error' : ''}`}>
-      <label className="field-label" htmlFor={id}>
+    <div
+      className={`field ${error ? 'field-error' : ''}`}
+      role={group ? 'group' : undefined}
+      aria-labelledby={group ? `${id}-label` : undefined}
+    >
+      <Wrapper
+        className="field-label"
+        id={group ? `${id}-label` : undefined}
+        htmlFor={group ? undefined : id}
+      >
         {label}
         {!required && <span className="field-optional">необязательно</span>}
-      </label>
+      </Wrapper>
       {children({ id, 'aria-describedby': describedBy || undefined, 'aria-invalid': !!error })}
       {hint && !error && (
         <div className="field-hint" id={`${id}-hint`}>

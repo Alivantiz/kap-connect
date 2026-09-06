@@ -58,7 +58,7 @@ describe('Активность', () => {
     const { user } = renderApp(<Activity myId="me-1" onOpenProfile={() => {}} />)
     await screen.findByText('Бекова Айгуль')
 
-    await user.click(screen.getByRole('tab', { name: 'Решения' }))
+    await user.click(screen.getByRole('button', { name: 'Решения' }))
     expect(await screen.findByText('В этой категории пока пусто.')).toBeInTheDocument()
   })
 

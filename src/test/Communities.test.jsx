@@ -95,7 +95,7 @@ describe('Сообщества', () => {
     const { user } = renderApp(<Communities myId="me-1" />)
     await screen.findByText('КИПиА Казатомпром')
 
-    await user.click(screen.getByRole('tab', { name: 'Предприятия' }))
+    await user.click(screen.getByRole('button', { name: 'Предприятия' }))
     await waitFor(() => expect(db.listCommunities).toHaveBeenCalledWith('dzo'))
   })
 })

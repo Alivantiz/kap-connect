@@ -116,6 +116,7 @@ export default function Search({ onOpenProfile, onClose }) {
           className={`dzo-trigger ${dzoFilter ? 'dzo-trigger-on' : ''}`}
           onClick={() => setDzoOpen((v) => !v)}
           aria-expanded={dzoOpen}
+          aria-haspopup="listbox"
         >
           <IconLocation size={15} />
           <span>{dzoFilter ? dzoCore(dzoFilter) : 'Все предприятия'}</span>
@@ -131,6 +132,8 @@ export default function Search({ onOpenProfile, onClose }) {
           <div className="dropdown" role="listbox">
             <button
               type="button"
+              role="option"
+              aria-selected={!dzoFilter}
               className={`dropdown-opt ${!dzoFilter ? 'dropdown-opt-on' : ''}`}
               onClick={() => {
                 setDzoFilter('')

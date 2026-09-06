@@ -148,13 +148,12 @@ export default function Feed({ myId, myProfile, onOpenProfile, onNeedProfile }) 
 
   return (
     <>
-      <div className="segmented" role="tablist" aria-label="Фильтр ленты">
+      <div className="segmented" role="group" aria-label="Фильтр ленты">
         {TABS.map((t) => (
           <button
             key={t.key}
             type="button"
-            role="tab"
-            aria-selected={filter === t.key}
+            aria-pressed={filter === t.key}
             title={t.title || undefined}
             className={`seg ${filter === t.key ? 'seg-on' : ''}`}
             onClick={() => (t.enabled ? setFilter(t.key) : onNeedProfile?.())}

@@ -168,13 +168,12 @@ export default function Communities({ myId }) {
         </button>
       </div>
 
-      <div className="segmented" role="tablist" aria-label="Тип сообществ">
+      <div className="segmented" role="group" aria-label="Тип сообществ">
         {TABS.map((t) => (
           <button
             key={t.key}
             type="button"
-            role="tab"
-            aria-selected={kind === t.key}
+            aria-pressed={kind === t.key}
             className={`seg ${kind === t.key ? 'seg-on' : ''}`}
             onClick={() => setKind(t.key)}
           >
@@ -285,7 +284,7 @@ function CommunityForm({ existing, myId, onClose, onSaved }) {
         maxLength={500}
       />
 
-      <Field label="Тип" required>
+      <Field label="Тип" required group>
         {() => (
           <div className="type-picker" role="radiogroup" aria-label="Тип сообщества">
             {KINDS.map((k) => (
@@ -306,7 +305,7 @@ function CommunityForm({ existing, myId, onClose, onSaved }) {
 
       {/* Вместо палитры эмодзи — отраслевой SVG-набор: одинаково выглядит
           на любой платформе и наследует цвет темы. */}
-      <Field label="Знак" required>
+      <Field label="Знак" required group>
         {() => (
           <div className="icon-grid" role="radiogroup" aria-label="Знак сообщества">
             {DOMAIN_ICON_KEYS.map((key) => (

@@ -67,13 +67,12 @@ export default function Activity({ myId, onOpenProfile, onRead }) {
         <h1 className="screen-title">Активность</h1>
       </div>
 
-      <div className="segmented" role="tablist" aria-label="Фильтр уведомлений">
+      <div className="segmented" role="group" aria-label="Фильтр уведомлений">
         {TABS.map((t) => (
           <button
             key={t.key}
             type="button"
-            role="tab"
-            aria-selected={filter === t.key}
+            aria-pressed={filter === t.key}
             className={`seg ${filter === t.key ? 'seg-on' : ''}`}
             onClick={() => setFilter(t.key)}
           >

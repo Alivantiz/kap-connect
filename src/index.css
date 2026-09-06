@@ -782,11 +782,6 @@ button {
   border-color: var(--text-disabled);
 }
 
-.btn-danger {
-  background: var(--red-600);
-  color: #fff;
-}
-
 .w-full {
   width: 100%;
 }
