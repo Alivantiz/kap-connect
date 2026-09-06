@@ -1,201 +1,251 @@
-import { useState, useEffect, useRef } from 'react'
-import { supabase } from '../lib/supabase'
-import { IconSearch, IconStar, IconBriefcase, IconLocation, IconClose, IconBack } from '../components/Icons'
+import { useEffect, useRef, useState } from 'react'
+import { listDzo, searchProfiles } from '../lib/db'
+import { dzoCore } from '../lib/format'
+import {
+  IconBack,
+  IconClose,
+  IconEmptySearch,
+  IconLocation,
+  IconSearch,
+  IconBriefcase,
+  IconChevronDown,
+} from '../components/Icons'
+import Avatar from '../components/ui/Avatar'
+import EmptyState from '../components/ui/EmptyState'
+import { RowSkeleton } from '../components/ui/Skeleton'
 
-const AVA_COLORS = ['#3A6BA8','#2E7D52','#8B5E1A','#5B3EA6','#7A3030','#1A6B6B','#4A6B1A','#6B1A5B']
-const avaColor = (name) => AVA_COLORS[(name?.charCodeAt(0)||0) % AVA_COLORS.length]
-const initials = (name) => (name||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase()
+const SUGGESTIONS = ['КИПиА', 'бурение', 'Siemens', 'SCADA', 'насосы', 'сорбция', 'геология']
 
-const dzoCore = (dzo) => {
-  if (!dzo) return ''
-  return dzo.replace(/^(АО|ТОО|СП|ДП|ЗАО)\s*/gi,'')
-    .replace(/«(СП|АО|ТОО|ДП)\s*/gi,'«').replace(/[«»""]/g,'')
-    .replace(/\(.*?\)/g,'').trim()
-}
-
-export default function Search({ myId, onOpenProfile, onClose }) {
-  const [query, setQuery]           = useState('')
-  const [dzoQuery, setDzoQuery]     = useState('')
-  const [dzoFilter, setDzoFilter]   = useState('')
-  const [dzoList, setDzoList]       = useState([])
-  const [dzoSuggestions, setDzoSuggestions] = useState([])
-  const [showDzoDrop, setShowDzoDrop] = useState(false)
-  const [results, setResults]       = useState([])
-  const [counts, setCounts]         = useState({})
-  const [loading, setLoading]       = useState(false)
+export default function Search({ onOpenProfile, onClose }) {
+  const [query, setQuery] = useState('')
+  const [dzoFilter, setDzoFilter] = useState('')
+  const [dzoList, setDzoList] = useState([])
+  const [dzoOpen, setDzoOpen] = useState(false)
+  const [results, setResults] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
   const inputRef = useRef(null)
-  const dzoRef   = useRef(null)
+  const dropRef = useRef(null)
+  const reqId = useRef(0)
 
   useEffect(() => {
     inputRef.current?.focus()
-    supabase.from('dzo_list').select('name').order('sort')
-      .then(({ data }) => setDzoList((data||[]).map(d => d.name)))
+    listDzo().then(({ data }) => data && setDzoList(data))
   }, [])
 
   useEffect(() => {
-    const w = dzoQuery.toLowerCase()
-    setDzoSuggestions(w ? dzoList.filter(d=>d.toLowerCase().includes(w)) : dzoList)
-  }, [dzoQuery, dzoList])
-
-  useEffect(() => {
-    const handler = (e) => {
-      if (dzoRef.current && !dzoRef.current.contains(e.target)) setShowDzoDrop(false)
+    const onDown = (e) => {
+      if (dropRef.current && !dropRef.current.contains(e.target)) setDzoOpen(false)
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
+    const onEsc = (e) => e.key === 'Escape' && (dzoOpen ? setDzoOpen(false) : onClose())
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [dzoOpen, onClose])
 
   useEffect(() => {
-    const t = setTimeout(async () => {
-      if (!query.trim() && !dzoFilter) { setResults([]); setCounts({}); setLoading(false); return }
-      setLoading(true)
-      let q = supabase.from('profiles').select('*').limit(50).order('full_name')
-      if (dzoFilter) q = q.eq('dzo', dzoFilter)
-      if (query.trim()) q = q.or(`full_name.ilike.%${query.trim()}%,position.ilike.%${query.trim()}%,specialty.ilike.%${query.trim()}%`)
-      const { data: rows } = await q
-      let list = rows || []
-      if (query.trim()) {
-        const w = query.trim().toLowerCase()
-        list = list.filter(r =>
-          r.full_name?.toLowerCase().includes(w) ||
-          r.position?.toLowerCase().includes(w) ||
-          r.specialty?.toLowerCase().includes(w) ||
-          (r.skills||[]).some(s=>s.toLowerCase().includes(w)) ||
-          (r.equipment||[]).some(s=>s.toLowerCase().includes(w))
-        )
-      }
-      setResults(list)
-      if (list.length > 0) {
-        const { data: pd } = await supabase.from('posts').select('author_id').in('author_id', list.map(r=>r.id))
-        const cnt = {}
-        for (const p of pd||[]) cnt[p.author_id] = (cnt[p.author_id]||0) + 1
-        setCounts(cnt)
-      } else setCounts({})
+    const q = query.trim()
+    if (!q && !dzoFilter) {
+      setResults(null)
       setLoading(false)
-    }, 300)
-    return () => clearTimeout(t)
+      setError('')
+      return
+    }
+    setLoading(true)
+    const timer = setTimeout(async () => {
+      // Ответ на устаревший запрос не должен перетирать свежий:
+      // при быстром наборе результаты раньше «прыгали» назад.
+      const id = ++reqId.current
+      const { data, error: e } = await searchProfiles(q, dzoFilter)
+      if (id !== reqId.current) return
+      setLoading(false)
+      if (e) {
+        setError(e)
+        setResults([])
+        return
+      }
+      setError('')
+      setResults(data || [])
+    }, 280)
+    return () => clearTimeout(timer)
   }, [query, dzoFilter])
 
-  const selectDzo = (d) => { setDzoFilter(d); setDzoQuery(d); setShowDzoDrop(false) }
-  const clearDzo  = () =>  { setDzoFilter(''); setDzoQuery(''); }
+  const clearAll = () => {
+    setQuery('')
+    setDzoFilter('')
+    inputRef.current?.focus()
+  }
 
   return (
-    <div className="search-overlay-inner">
-      {/* Шапка */}
-      <div className="search-overlay-header">
-        <button className="icon-btn" onClick={onClose}><IconBack size={19}/></button>
-        <div className="search-field" style={{ flex:1 }}>
-          <IconSearch size={16} color="var(--text3)" />
+    <div className="overlay-screen">
+      <header className="overlay-head">
+        <button type="button" className="icon-btn" onClick={onClose} aria-label="Закрыть поиск">
+          <IconBack size={19} />
+        </button>
+        <div className="search-box">
+          <IconSearch size={16} />
           <input
             ref={inputRef}
+            className="search-input"
             value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Имя, должность, навык, оборудование..."
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Имя, должность, навык, оборудование"
+            aria-label="Поиск сотрудников"
             autoComplete="off"
+            type="search"
           />
-          {query && <button className="clear-btn" onClick={()=>setQuery('')}><IconClose size={14}/></button>}
+          {query && (
+            <button
+              type="button"
+              className="icon-btn icon-btn-sm"
+              onClick={() => setQuery('')}
+              aria-label="Очистить"
+            >
+              <IconClose size={14} />
+            </button>
+          )}
         </div>
-      </div>
+      </header>
 
-      {/* Фильтр ДЗО */}
-      <div style={{ padding:'8px 16px', borderBottom:'1px solid var(--border)' }} ref={dzoRef}>
-        <div className={`search-field ${dzoFilter?'has-value':''}`}>
-          <IconLocation size={16} color={dzoFilter?'var(--accent)':'var(--text3)'} />
-          <input
-            value={dzoQuery}
-            onChange={e=>{ setDzoQuery(e.target.value); setDzoFilter(''); setShowDzoDrop(true) }}
-            onFocus={()=>setShowDzoDrop(true)}
-            placeholder="Фильтр по ДЗО..."
-            autoComplete="off"
-          />
-          {(dzoQuery||dzoFilter) && <button className="clear-btn" onClick={clearDzo}><IconClose size={14}/></button>}
-        </div>
+      <div className="search-filter" ref={dropRef}>
+        <button
+          type="button"
+          className={`dzo-trigger ${dzoFilter ? 'dzo-trigger-on' : ''}`}
+          onClick={() => setDzoOpen((v) => !v)}
+          aria-expanded={dzoOpen}
+        >
+          <IconLocation size={15} />
+          <span>{dzoFilter ? dzoCore(dzoFilter) : 'Все предприятия'}</span>
+          <IconChevronDown size={15} />
+        </button>
+        {dzoFilter && (
+          <button type="button" className="chip chip-clear" onClick={() => setDzoFilter('')}>
+            <IconClose size={11} /> Сбросить
+          </button>
+        )}
 
-        {showDzoDrop && dzoSuggestions.length > 0 && (
-          <div className="dzo-dropdown">
-            {dzoSuggestions.map(d => (
-              <div key={d} className={`dzo-option ${dzoFilter===d?'selected':''}`} onClick={()=>selectDzo(d)}>
+        {dzoOpen && (
+          <div className="dropdown" role="listbox">
+            <button
+              type="button"
+              className={`dropdown-opt ${!dzoFilter ? 'dropdown-opt-on' : ''}`}
+              onClick={() => {
+                setDzoFilter('')
+                setDzoOpen(false)
+              }}
+            >
+              Все предприятия
+            </button>
+            {dzoList.map((d) => (
+              <button
+                key={d}
+                type="button"
+                role="option"
+                aria-selected={dzoFilter === d}
+                className={`dropdown-opt ${dzoFilter === d ? 'dropdown-opt-on' : ''}`}
+                onClick={() => {
+                  setDzoFilter(d)
+                  setDzoOpen(false)
+                }}
+              >
                 {d}
-                {dzoFilter===d && <span className="dzo-check">✓</span>}
-              </div>
+              </button>
             ))}
           </div>
         )}
       </div>
 
-      {/* Активный фильтр */}
-      {dzoFilter && (
-        <div style={{ padding:'8px 16px' }}>
-          <div className="active-filter">
-            <span>{dzoFilter}</span>
-            <button onClick={clearDzo}><IconClose size={12}/></button>
-          </div>
-        </div>
-      )}
+      <div className="overlay-body">
+        {loading && <RowSkeleton count={4} />}
 
-      {/* Результаты */}
-      <div style={{ flex:1, overflowY:'auto' }}>
-        {loading && <div className="spinner" />}
-
-        {!loading && results.length === 0 && (query || dzoFilter) && (
-          <div className="empty-state">
-            <div className="empty-icon">🔍</div>
-            <div className="empty-title">Никого не нашли</div>
-            <div className="empty-sub">Попробуйте другой запрос</div>
-          </div>
-        )}
-
-        {!loading && !query && !dzoFilter && (
-          <div className="empty-state">
-            <div className="empty-icon">🔍</div>
-            <div className="empty-title">Найдите эксперта</div>
-            <div className="empty-sub">Введите имя, должность, навык или оборудование</div>
-          </div>
-        )}
-
-        {!loading && results.length > 0 && (
-          <div className="div-label">Найдено {results.length}</div>
-        )}
-
-        {results.map(p => (
-          <div className="expert" key={p.id} onClick={() => onOpenProfile(p.id)}>
-            <div className="ava" style={{ background:avaColor(p.full_name), width:46, height:46, fontSize:15, flexShrink:0 }}>
-              {initials(p.full_name)}
+        {!loading && results === null && (
+          <>
+            <EmptyState
+              icon={IconEmptySearch}
+              title="Найдите эксперта"
+              text="Ищет по имени, должности, навыкам и оборудованию по всем предприятиям группы."
+            />
+            <div className="sugg">
+              <div className="sugg-label">Частые запросы</div>
+              <div className="chips">
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className="chip chip-btn"
+                    onClick={() => setQuery(s)}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="exp-info">
-              <div className="exp-name">
-                {p.full_name}
-                {p.is_expert && <IconStar size={12} active color="var(--gold)" />}
-              </div>
-              <div className="exp-meta-row">
-                {(p.position||p.specialty) && (
-                  <span className="exp-meta-item">
-                    <IconBriefcase size={11} color="var(--text3)" />
-                    {p.position||p.specialty}
-                  </span>
-                )}
-                {p.dzo && (
-                  <span className="exp-meta-item">
-                    <IconLocation size={11} color="var(--text3)" />
-                    {dzoCore(p.dzo)}
-                  </span>
-                )}
-              </div>
-              {p.skills?.length > 0 && (
-                <div className="exp-chips">
-                  {p.skills.slice(0,4).map(s => <span className="exp-chip" key={s}>{s}</span>)}
+          </>
+        )}
+
+        {!loading && error && (
+          <EmptyState icon={IconEmptySearch} title="Поиск не сработал" text={error} />
+        )}
+
+        {!loading && !error && results?.length === 0 && (
+          <EmptyState
+            icon={IconEmptySearch}
+            title="Никого не нашли"
+            text="Попробуйте другой запрос или снимите фильтр по предприятию."
+            action={
+              <button type="button" className="link" onClick={clearAll}>
+                Сбросить поиск
+              </button>
+            }
+          />
+        )}
+
+        {!loading && results?.length > 0 && (
+          <div className="list-label">Найдено: {results.length}</div>
+        )}
+
+        {!loading &&
+          results?.map((p) => {
+            const role = p.position || p.specialty
+            return (
+              <button
+                type="button"
+                className="person"
+                key={p.id}
+                onClick={() => onOpenProfile(p.id)}
+              >
+                <Avatar name={p.full_name} size={46} expert={p.is_expert} />
+                <div className="person-info">
+                  <div className="person-name">{p.full_name}</div>
+                  <div className="person-meta">
+                    {role && (
+                      <span>
+                        <IconBriefcase size={11} /> {role}
+                      </span>
+                    )}
+                    {p.dzo && (
+                      <span>
+                        <IconLocation size={11} /> {dzoCore(p.dzo, 2)}
+                      </span>
+                    )}
+                  </div>
+                  {p.skills?.length > 0 && (
+                    <div className="chips chips-sm">
+                      {p.skills.slice(0, 4).map((s, i) => (
+                        <span className="chip" key={`${s}-${i}`}>
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            {counts[p.id] > 0 && (
-              <div className="exp-right">
-                <div className="exp-stat-val">{counts[p.id]}</div>
-                <div className="exp-stat-key">публ.</div>
-              </div>
-            )}
-          </div>
-        ))}
-        <div style={{ height:40 }} />
+              </button>
+            )
+          })}
+        <div style={{ height: 32 }} />
       </div>
     </div>
   )

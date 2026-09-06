@@ -1,266 +1,342 @@
-import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
-import { IconPlus, IconClose } from '../components/Icons'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  createCommunity,
+  deleteCommunity,
+  joinCommunity,
+  leaveCommunity,
+  listCommunities,
+  myCommunityIds,
+  updateCommunity,
+} from '../lib/db'
+import { countLabel } from '../lib/format'
+import { IconEdit, IconGroups, IconLock, IconPlus, IconTrash } from '../components/Icons'
+import { DOMAIN_ICONS, DOMAIN_ICON_KEYS, DomainIcon } from '../components/DomainIcons'
+import Sheet from '../components/ui/Sheet'
+import Button from '../components/ui/Button'
+import EmptyState from '../components/ui/EmptyState'
+import { RowSkeleton } from '../components/ui/Skeleton'
+import { TextField, TextArea, Field } from '../components/ui/Field'
+import { useToast } from '../components/ui/toast-context'
 
-const EMOJIS = ['⚙️','⛏️','🔬','🔧','⚡','🏔️','🏭','🏗️','⚒️','👷','🧪','🛢️','📡','💡','🔩','🛠️','📊','🌿','🚜','🏠']
-const KINDS  = [
-  {value:'specialty', label:'По специальности'},
-  {value:'dzo',       label:'По ДЗО'},
-  {value:'interest',  label:'По интересам'},
+const KINDS = [
+  { value: 'specialty', label: 'По специальности' },
+  { value: 'dzo', label: 'По предприятию' },
+  { value: 'interest', label: 'По интересам' },
 ]
 
-export default function Communities({myId}) {
+const TABS = [
+  { key: 'all', label: 'Все' },
+  { key: 'specialty', label: 'Специальности' },
+  { key: 'dzo', label: 'Предприятия' },
+  { key: 'interest', label: 'Интересы' },
+]
+
+export default function Communities({ myId }) {
   const [kind, setKind] = useState('all')
-  const [comms, setComms] = useState(null)
-  const [myMemberships, setMyMemberships] = useState(new Set())
-  const [counts, setCounts] = useState({})
-  const [showCreate, setShowCreate] = useState(false)
-  const [editTarget, setEditTarget] = useState(null)
+  const [items, setItems] = useState(null)
+  const [mine, setMine] = useState(() => new Set())
+  const [form, setForm] = useState(null)
+  const toast = useToast()
+  const busy = useRef(new Set())
 
   const load = useCallback(async () => {
-    let q = supabase.from('communities').select('*').order('created_at',{ascending:false})
-    if (kind!=='all') q = q.eq('kind',kind)
-    const {data} = await q
-    setComms(data||[])
-
-    const {data:mem} = await supabase
-      .from('community_members').select('community_id').eq('user_id',myId)
-    setMyMemberships(new Set((mem||[]).map(m=>m.community_id)))
-
-    const {data:allMem} = await supabase.from('community_members').select('community_id')
-    const cnt={}
-    for (const m of allMem||[]) cnt[m.community_id]=(cnt[m.community_id]||0)+1
-    setCounts(cnt)
-  }, [kind, myId])
-
-  useEffect(()=>{load()},[load])
-
-  const toggle = async (comm) => {
-    const isIn = myMemberships.has(comm.id)
-    const next = new Set(myMemberships)
-    isIn ? next.delete(comm.id) : next.add(comm.id)
-    setMyMemberships(next)
-    setCounts(c=>({...c,[comm.id]:(c[comm.id]||0)+(isIn?-1:1)}))
-    if (isIn) {
-      await supabase.from('community_members').delete()
-        .eq('community_id',comm.id).eq('user_id',myId)
-    } else {
-      await supabase.from('community_members').insert({community_id:comm.id,user_id:myId})
+    const [list, ids] = await Promise.all([listCommunities(kind), myCommunityIds(myId)])
+    if (list.error) {
+      toast.error(list.error)
+      setItems([])
+      return
     }
+    setItems(list.data || [])
+    if (ids.data) setMine(ids.data)
+  }, [kind, myId, toast])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  /** Вступление с откатом: раньше счётчик расходился при любом сбое записи. */
+  const toggle = async (c) => {
+    if (busy.current.has(c.id)) return
+    busy.current.add(c.id)
+    const joined = mine.has(c.id)
+    const delta = joined ? -1 : 1
+
+    setMine((prev) => {
+      const next = new Set(prev)
+      if (joined) next.delete(c.id)
+      else next.add(c.id)
+      return next
+    })
+    setItems((prev) =>
+      prev.map((x) =>
+        x.id === c.id ? { ...x, members_count: Math.max(0, Number(x.members_count) + delta) } : x,
+      ),
+    )
+
+    const { error } = joined ? await leaveCommunity(c.id, myId) : await joinCommunity(c.id, myId)
+    busy.current.delete(c.id)
+    if (!error) return
+
+    setMine((prev) => {
+      const next = new Set(prev)
+      if (joined) next.add(c.id)
+      else next.delete(c.id)
+      return next
+    })
+    setItems((prev) =>
+      prev.map((x) =>
+        x.id === c.id ? { ...x, members_count: Math.max(0, Number(x.members_count) - delta) } : x,
+      ),
+    )
+    toast.error(error)
   }
 
-  const handleDelete = async (comm) => {
-    if (!window.confirm(`Удалить группу «${comm.name}»?`)) return
-    await supabase.from('community_members').delete().eq('community_id',comm.id)
-    await supabase.from('communities').delete().eq('id',comm.id)
+  const remove = async (c) => {
+    if (!window.confirm(`Удалить сообщество «${c.name}»? Участники потеряют к нему доступ.`)) return
+    const { error } = await deleteCommunity(c.id)
+    if (error) return toast.error(error)
+    toast.success('Сообщество удалено')
     load()
   }
 
-  const mine = comms?.filter(c=>myMemberships.has(c.id))||[]
-  const rest  = comms?.filter(c=>!myMemberships.has(c.id))||[]
+  const joined = (items || []).filter((c) => mine.has(c.id))
+  const rest = (items || []).filter((c) => !mine.has(c.id))
+
+  const card = (c) => (
+    <div className="comm" key={c.id}>
+      <div className={`comm-icon icon-${c.icon || 'gear'}`}>
+        <DomainIcon name={c.icon} size={22} />
+      </div>
+      <div className="comm-info">
+        <div className="comm-top">
+          <span className="comm-name">{c.name}</span>
+          {c.is_closed && (
+            <span className="comm-lock" title="Закрытое сообщество">
+              <IconLock size={12} />
+            </span>
+          )}
+        </div>
+        {c.description && <p className="comm-desc">{c.description}</p>}
+        <div className="comm-meta">
+          {countLabel(Number(c.members_count) || 0, 'участник', 'участника', 'участников')}
+        </div>
+      </div>
+      <div className="comm-actions">
+        <button
+          type="button"
+          className={`join ${mine.has(c.id) ? 'join-on' : ''}`}
+          onClick={() => toggle(c)}
+          aria-pressed={mine.has(c.id)}
+        >
+          {mine.has(c.id) ? 'Вы в группе' : 'Вступить'}
+        </button>
+        {c.creator_id === myId && (
+          <div className="comm-owner">
+            <button
+              type="button"
+              className="icon-btn icon-btn-sm"
+              onClick={() => setForm(c)}
+              aria-label={`Изменить ${c.name}`}
+            >
+              <IconEdit size={15} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn icon-btn-sm"
+              onClick={() => remove(c)}
+              aria-label={`Удалить ${c.name}`}
+            >
+              <IconTrash size={15} />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <>
-      {/* Заголовок экрана */}
-      <div className="screen-header">
-        <div className="screen-title">Группы</div>
+      <div className="screen-bar">
+        <h1 className="screen-title">Сообщества</h1>
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => setForm({})}
+          aria-label="Создать сообщество"
+        >
+          <IconPlus size={19} />
+        </button>
       </div>
 
-      {/* Сегментированный контрол — 4 варианта */}
-      <div className="seg" style={{gap:5}}>
-        {[{v:'all',l:'Все'}, ...KINDS.map(k=>({v:k.value,l:k.label}))].map(({v,l})=>(
-          <button key={v} className={`seg-btn ${kind===v?'active':''}`}
-            style={{fontSize:12}} onClick={()=>setKind(v)}>{l}</button>
+      <div className="segmented" role="tablist" aria-label="Тип сообществ">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={kind === t.key}
+            className={`seg ${kind === t.key ? 'seg-on' : ''}`}
+            onClick={() => setKind(t.key)}
+          >
+            {t.label}
+          </button>
         ))}
       </div>
 
-      {comms===null && <div className="spinner"/>}
+      {items === null && <RowSkeleton count={4} />}
 
-      {comms?.length===0 && (
-        <div className="empty-state">
-          <div className="empty-icon">👥</div>
-          <div className="empty-title">Нет групп</div>
-          <div className="empty-sub">
-            Создайте первую — объедините коллег по специальности, ДЗО или интересам.
-          </div>
-          <button className="btn-primary"
-            style={{width:'auto',padding:'10px 24px',margin:'16px auto 0'}}
-            onClick={()=>setShowCreate(true)}>
-            Создать группу
-          </button>
-        </div>
+      {items?.length === 0 && (
+        <EmptyState
+          icon={IconGroups}
+          title="Сообществ пока нет"
+          text="Создайте группу по своей специальности — коллеги со всех предприятий смогут вступить."
+          action={
+            <Button variant="primary" icon={IconPlus} onClick={() => setForm({})}>
+              Создать
+            </Button>
+          }
+        />
       )}
 
-      {mine.length>0 && <div className="div-label">Вы состоите</div>}
-      {mine.map(c=>(
-        <CommCard key={c.id} c={c} isIn count={counts[c.id]||0}
-          isOwner={c.creator_id===myId}
-          onToggle={toggle} onEdit={()=>setEditTarget(c)} onDelete={()=>handleDelete(c)}/>
-      ))}
-
-      {rest.length>0 && <div className="div-label">{mine.length>0?'Другие группы':'Все группы'}</div>}
-      {rest.map(c=>(
-        <CommCard key={c.id} c={c} isIn={false} count={counts[c.id]||0}
-          isOwner={c.creator_id===myId}
-          onToggle={toggle} onEdit={()=>setEditTarget(c)} onDelete={()=>handleDelete(c)}/>
-      ))}
-
-      {/* FAB — создать группу (такой же как в ленте) */}
-      <button className="fab" onClick={()=>setShowCreate(true)} aria-label="Создать группу">
-        <IconPlus size={22}/>
-      </button>
-
-      {showCreate && (
-        <CommForm myId={myId}
-          onClose={()=>setShowCreate(false)}
-          onSaved={()=>{setShowCreate(false);load()}}/>
+      {joined.length > 0 && (
+        <>
+          <div className="list-label">Мои сообщества</div>
+          {joined.map(card)}
+        </>
       )}
-      {editTarget && (
-        <CommForm myId={myId} existing={editTarget}
-          onClose={()=>setEditTarget(null)}
-          onSaved={()=>{setEditTarget(null);load()}}/>
+      {rest.length > 0 && (
+        <>
+          <div className="list-label">{joined.length > 0 ? 'Другие' : 'Все сообщества'}</div>
+          {rest.map(card)}
+        </>
+      )}
+      <div style={{ height: 20 }} />
+
+      {form && (
+        <CommunityForm
+          existing={form.id ? form : null}
+          myId={myId}
+          onClose={() => setForm(null)}
+          onSaved={() => {
+            setForm(null)
+            load()
+          }}
+        />
       )}
     </>
   )
 }
 
-function CommCard({c, isIn, count, isOwner, onToggle, onEdit, onDelete}) {
-  const kindLabel = KINDS.find(k=>k.value===c.kind)?.label||c.kind
-  return (
-    <div className="comm-card">
-      <div className="comm-top">
-        <div className="comm-emoji">{c.emoji||'👥'}</div>
-        <div className="comm-info">
-          <div className="comm-name">
-            {c.name}
-            {isOwner && <span className="owner-badge">Моя</span>}
-          </div>
-          <div className="comm-meta">
-            {plural(count)} · {kindLabel}{c.is_closed?' · Закрытая':''}
-          </div>
-        </div>
-        <div style={{display:'flex',flexDirection:'column',gap:6,alignItems:'flex-end',flexShrink:0}}>
-          <button className={`join-btn ${isIn?'in':'out'}`} onClick={()=>onToggle(c)}>
-            {isIn?'В группе':'Вступить'}
-          </button>
-          {isOwner && (
-            <div style={{display:'flex',gap:5}}>
-              <button className="comm-action-btn" onClick={onEdit} title="Редактировать">✏️</button>
-              <button className="comm-action-btn" onClick={onDelete} title="Удалить">🗑️</button>
-            </div>
-          )}
-        </div>
-      </div>
-      {c.description && <div className="comm-desc">{c.description}</div>}
-    </div>
-  )
-}
-
-function CommForm({myId, existing, onClose, onSaved}) {
-  const [name, setName]     = useState(existing?.name||'')
-  const [desc, setDesc]     = useState(existing?.description||'')
-  const [emoji, setEmoji]   = useState(existing?.emoji||'⚙️')
-  const [kind, setKind]     = useState(existing?.kind||'specialty')
-  const [closed, setClosed] = useState(existing?.is_closed||false)
+function CommunityForm({ existing, myId, onClose, onSaved }) {
+  const [name, setName] = useState(existing?.name || '')
+  const [desc, setDesc] = useState(existing?.description || '')
+  const [icon, setIcon] = useState(existing?.icon || 'gear')
+  const [kind, setKind] = useState(existing?.kind || 'specialty')
+  const [closed, setClosed] = useState(existing?.is_closed || false)
   const [saving, setSaving] = useState(false)
-  const [error, setError]   = useState('')
+  const [err, setErr] = useState('')
 
   const save = async () => {
-    if (!name.trim()) { setError('Введите название'); return }
+    const n = name.trim()
+    if (n.length < 2) return setErr('Название минимум 2 символа')
+    setErr('')
     setSaving(true)
-    if (existing) {
-      const {error:e} = await supabase.from('communities').update({
-        name:name.trim(), description:desc.trim()||null,
-        emoji, kind, is_closed:closed,
-      }).eq('id',existing.id)
-      if (e) { setError(e.message); setSaving(false); return }
-    } else {
-      const {data:newComm, error:e} = await supabase.from('communities').insert({
-        name:name.trim(), description:desc.trim()||null,
-        emoji, kind, is_closed:closed, creator_id:myId,
-      }).select().single()
-      if (e) { setError(e.message); setSaving(false); return }
-      if (newComm) {
-        await supabase.from('community_members')
-          .insert({community_id:newComm.id, user_id:myId})
-      }
-    }
+    const payload = { name: n, description: desc.trim() || null, icon, kind, is_closed: closed }
+    const { data, error } = existing
+      ? await updateCommunity(existing.id, payload)
+      : await createCommunity({ ...payload, creator_id: myId })
+    if (!error && !existing && data) await joinCommunity(data.id, myId)
     setSaving(false)
+    if (error) return setErr(error)
     onSaved()
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div className="modal-title">
-          {existing ? 'Редактировать группу' : 'Новая группа'}
-          <button className="icon-btn" onClick={onClose}><IconClose size={18}/></button>
+    <Sheet
+      title={existing ? 'Изменить сообщество' : 'Новое сообщество'}
+      onClose={onClose}
+      size="tall"
+      footer={
+        <Button variant="primary" size="lg" className="w-full" loading={saving} onClick={save}>
+          {existing ? 'Сохранить' : 'Создать'}
+        </Button>
+      }
+    >
+      {err && (
+        <div className="banner banner-error" role="alert">
+          {err}
         </div>
+      )}
 
-        {error && <div className="auth-error">{error}</div>}
+      <TextField
+        label="Название"
+        required
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Например: Насосное оборудование"
+        maxLength={80}
+      />
+      <TextArea
+        label="Описание"
+        rows={3}
+        value={desc}
+        onChange={(e) => setDesc(e.target.value)}
+        placeholder="Кому и зачем эта группа"
+        maxLength={500}
+      />
 
-        <div className="field">
-          <label>Иконка</label>
-          <div className="emoji-picker">
-            {EMOJIS.map(e=>(
-              <button key={e} className={`emoji-opt ${emoji===e?'sel':''}`} onClick={()=>setEmoji(e)}>
-                {e}
+      <Field label="Тип" required>
+        {() => (
+          <div className="type-picker" role="radiogroup" aria-label="Тип сообщества">
+            {KINDS.map((k) => (
+              <button
+                key={k.value}
+                type="button"
+                role="radio"
+                aria-checked={kind === k.value}
+                className={`type-opt ${kind === k.value ? 'type-opt-on' : ''}`}
+                onClick={() => setKind(k.value)}
+              >
+                <span>{k.label}</span>
               </button>
             ))}
           </div>
-        </div>
+        )}
+      </Field>
 
-        <div className="field">
-          <label>Название</label>
-          <input value={name} onChange={e=>setName(e.target.value)}
-            placeholder="Например: Буровики Инкай, КИПиА Казатомпром..."/>
-        </div>
-
-        <div className="field">
-          <label>Описание <span style={{fontWeight:400,color:'var(--text3)'}}>необязательно</span></label>
-          <textarea value={desc} onChange={e=>setDesc(e.target.value)}
-            placeholder="О чём эта группа, кому будет полезна..."/>
-        </div>
-
-        <div className="field">
-          <label>Тип группы</label>
-          <div className="seg" style={{padding:0,border:'none',gap:5}}>
-            {KINDS.map(k=>(
-              <button key={k.value} className={`seg-btn ${kind===k.value?'active':''}`}
-                style={{fontSize:12}} onClick={()=>setKind(k.value)}>
-                {k.label}
+      {/* Вместо палитры эмодзи — отраслевой SVG-набор: одинаково выглядит
+          на любой платформе и наследует цвет темы. */}
+      <Field label="Знак" required>
+        {() => (
+          <div className="icon-grid" role="radiogroup" aria-label="Знак сообщества">
+            {DOMAIN_ICON_KEYS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                role="radio"
+                aria-checked={icon === key}
+                aria-label={DOMAIN_ICONS[key].label}
+                title={DOMAIN_ICONS[key].label}
+                className={`icon-pick ${icon === key ? 'icon-pick-on' : ''}`}
+                onClick={() => setIcon(key)}
+              >
+                <DomainIcon name={key} size={21} />
               </button>
             ))}
           </div>
-        </div>
+        )}
+      </Field>
 
-        <div className="field">
-          <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer'}}
-                 onClick={()=>setClosed(!closed)}>
-            <div className={`toggle ${closed?'on':''}`}>
-              <div className="toggle-thumb"/>
-            </div>
-            <span>
-              Закрытая группа
-              <span style={{fontWeight:400,color:'var(--text3)',marginLeft:6}}>
-                {closed ? '— по приглашению' : '— открытая'}
-              </span>
-            </span>
-          </label>
-        </div>
-
-        <button className="btn-primary" style={{margin:'4px 0 0',width:'100%'}}
-          disabled={saving} onClick={save}>
-          {saving ? 'Сохраняем...' : existing ? 'Сохранить изменения' : 'Создать группу'}
-        </button>
-      </div>
-    </div>
+      <label className="switch">
+        <input type="checkbox" checked={closed} onChange={(e) => setClosed(e.target.checked)} />
+        <span className="switch-track" aria-hidden="true">
+          <span className="switch-knob" />
+        </span>
+        <span className="switch-label">
+          Закрытое сообщество
+          <span className="switch-hint">Отмечается замком в списке</span>
+        </span>
+      </label>
+    </Sheet>
   )
-}
-
-function plural(n) {
-  const m10=n%10, m100=n%100
-  if (m10===1&&m100!==11) return n+' участник'
-  if (m10>=2&&m10<=4&&(m100<12||m100>14)) return n+' участника'
-  return n+' участников'
 }

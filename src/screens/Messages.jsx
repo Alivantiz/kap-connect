@@ -1,328 +1,379 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { supabase } from '../lib/supabase'
-import { IconBack, IconSend, IconSearch, IconClose } from '../components/Icons'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  listConversations,
+  listMessages,
+  markMessagesRead,
+  openConversation,
+  searchPeopleByName,
+  sendMessage,
+  subscribeToMessages,
+} from '../lib/db'
+import { dateLabel, dzoCore, timeAgo, timeExact } from '../lib/format'
+import {
+  IconBack,
+  IconClose,
+  IconEdit,
+  IconEmptyInbox,
+  IconHand,
+  IconSearch,
+  IconSend,
+} from '../components/Icons'
+import Avatar from '../components/ui/Avatar'
+import Sheet from '../components/ui/Sheet'
+import EmptyState from '../components/ui/EmptyState'
+import Spinner from '../components/ui/Spinner'
+import { RowSkeleton } from '../components/ui/Skeleton'
+import { useToast } from '../components/ui/toast-context'
 
-const AVA_COLORS = ['#3A6BA8','#2E7D52','#8B5E1A','#5B3EA6','#7A3030','#1A6B6B','#4A6B1A','#6B1A5B']
-const avaColor = (name) => AVA_COLORS[(name?.charCodeAt(0)||0) % AVA_COLORS.length]
-const initials = (name) => (name||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase()
+export default function Messages({
+  myId,
+  onOpenProfile,
+  onUnreadChange,
+  startWith,
+  onStartHandled,
+}) {
+  const [convs, setConvs] = useState(null)
+  const [open, setOpen] = useState(null)
+  const [search, setSearch] = useState('')
+  const [picker, setPicker] = useState(false)
+  const toast = useToast()
 
-const timeAgo = (iso) => {
-  if (!iso) return ''
-  const s = (Date.now() - new Date(iso).getTime()) / 1000
-  if (s < 60) return 'сейчас'
-  if (s < 3600) return Math.floor(s/60) + 'м'
-  if (s < 86400) return Math.floor(s/3600) + 'ч'
-  if (s < 604800) return Math.floor(s/86400) + 'д'
-  return new Date(iso).toLocaleDateString('ru', { day:'numeric', month:'short' })
-}
-
-const timeExact = (iso) =>
-  new Date(iso).toLocaleTimeString('ru', { hour:'2-digit', minute:'2-digit' })
-
-export default function Messages({ myId, myProfile, onOpenProfile, onUnreadChange }) {
-  const [convs, setConvs]       = useState(null)
-  const [openConv, setOpenConv] = useState(null) // { id, profile }
-  const [search, setSearch]     = useState('')
-
-  const loadConvs = useCallback(async () => {
-    const { data } = await supabase
-      .from('conversations')
-      .select(`
-        *,
-        p1:profiles!conversations_user1_id_fkey(id,full_name,position,dzo),
-        p2:profiles!conversations_user2_id_fkey(id,full_name,position,dzo)
-      `)
-      .or(`user1_id.eq.${myId},user2_id.eq.${myId}`)
-      .order('last_msg_at', { ascending: false })
-    setConvs(data || [])
-
-    // Считаем непрочитанные
-    const { count } = await supabase
-      .from('messages').select('id', { count:'exact', head:true })
-      .eq('read', false).neq('sender_id', myId)
-    onUnreadChange?.(count || 0)
-  }, [myId, onUnreadChange])
-
-  useEffect(() => { loadConvs() }, [loadConvs])
-
-  // Realtime обновления
-  useEffect(() => {
-    const ch = supabase.channel('convs')
-      .on('postgres_changes', { event:'*', schema:'public', table:'conversations' }, loadConvs)
-      .subscribe()
-    return () => supabase.removeChannel(ch)
-  }, [loadConvs])
-
-  const openChat = (conv) => {
-    const other = conv.user1_id === myId ? conv.p2 : conv.p1
-    setOpenConv({ id: conv.id, profile: other })
-  }
-
-  // Начать новый диалог
-  const startChat = async (otherProfile) => {
-    const [a, b] = [myId, otherProfile.id].sort()
-    // проверяем существующий
-    const { data: existing } = await supabase
-      .from('conversations')
-      .select('*')
-      .or(`and(user1_id.eq.${a},user2_id.eq.${b}),and(user1_id.eq.${b},user2_id.eq.${a})`)
-      .single()
-
-    if (existing) {
-      setOpenConv({ id: existing.id, profile: otherProfile })
-    } else {
-      const { data: created } = await supabase
-        .from('conversations')
-        .insert({ user1_id: myId, user2_id: otherProfile.id })
-        .select().single()
-      if (created) setOpenConv({ id: created.id, profile: otherProfile })
+  const load = useCallback(async () => {
+    const { data, error } = await listConversations(myId)
+    if (error) {
+      toast.error(error)
+      setConvs([])
+      return
     }
-    loadConvs()
-  }
+    setConvs(data || [])
+  }, [myId, toast])
 
-  if (openConv) {
+  useEffect(() => {
+    load()
+  }, [load])
+
+  const other = useCallback((c) => (c.user1_id === myId ? c.p2 : c.p1), [myId])
+
+  const start = useCallback(
+    async (person) => {
+      const { data: convId, error } = await openConversation(person.id)
+      if (error) return toast.error(error)
+      setOpen({ id: convId, profile: person })
+      load()
+    },
+    [load, toast],
+  )
+
+  // Переход «написать» из чужого профиля.
+  useEffect(() => {
+    if (!startWith) return
+    start(startWith).finally(() => onStartHandled?.())
+  }, [startWith, start, onStartHandled])
+
+  if (open) {
     return (
       <Chat
-        conv={openConv}
+        conv={open}
         myId={myId}
-        onBack={() => { setOpenConv(null); loadConvs() }}
+        onBack={() => {
+          setOpen(null)
+          load()
+        }}
         onOpenProfile={onOpenProfile}
+        onUnreadChange={onUnreadChange}
       />
     )
   }
 
-  const filtered = (convs || []).filter(c => {
-    const other = c.user1_id === myId ? c.p2 : c.p1
-    return !search || other?.full_name?.toLowerCase().includes(search.toLowerCase())
-  })
+  const q = search.trim().toLowerCase()
+  const list = (convs || []).filter((c) => !q || other(c)?.full_name?.toLowerCase().includes(q))
 
   return (
     <>
-      <div className="screen-header">
-        <div className="screen-title">Сообщения</div>
-        <NewChatBtn myId={myId} onSelect={startChat} />
+      <div className="screen-bar">
+        <h1 className="screen-title">Сообщения</h1>
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={() => setPicker(true)}
+          aria-label="Новое сообщение"
+        >
+          <IconEdit size={19} />
+        </button>
       </div>
 
-      <div className="search-filters" style={{ paddingBottom:8 }}>
-        <div className="search-field">
-          <IconSearch size={16} color="var(--text3)" />
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Поиск диалогов..." />
-          {search && <button className="clear-btn" onClick={()=>setSearch('')}><IconClose size={14}/></button>}
-        </div>
-      </div>
-
-      {convs === null && <div className="spinner" />}
-
-      {convs?.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-icon">💬</div>
-          <div className="empty-title">Нет сообщений</div>
-          <div className="empty-sub">Напишите коллеге — найдите его через поиск и откройте профиль.</div>
+      {convs?.length > 0 && (
+        <div className="search-strip">
+          <div className="search-box">
+            <IconSearch size={15} />
+            <input
+              className="search-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Поиск по диалогам"
+              aria-label="Поиск по диалогам"
+              type="search"
+            />
+            {search && (
+              <button
+                type="button"
+                className="icon-btn icon-btn-sm"
+                onClick={() => setSearch('')}
+                aria-label="Очистить"
+              >
+                <IconClose size={14} />
+              </button>
+            )}
+          </div>
         </div>
       )}
 
-      {filtered.map(conv => {
-        const other = conv.user1_id === myId ? conv.p2 : conv.p1
+      {convs === null && <RowSkeleton count={4} />}
+
+      {convs?.length === 0 && (
+        <EmptyState
+          icon={IconEmptyInbox}
+          title="Нет диалогов"
+          text="Найдите коллегу через поиск, откройте профиль и нажмите «Написать сообщение»."
+        />
+      )}
+
+      {convs?.length > 0 && list.length === 0 && (
+        <EmptyState icon={IconSearch} text={`По запросу «${search}» диалогов нет.`} />
+      )}
+
+      {list.map((c) => {
+        const p = other(c)
         return (
-          <div className="conv-item" key={conv.id} onClick={() => openChat(conv)}>
-            <div className="ava" style={{ background: avaColor(other?.full_name), width:48, height:48, fontSize:16, flexShrink:0 }}>
-              {initials(other?.full_name)}
-            </div>
+          <button
+            type="button"
+            className="conv"
+            key={c.id}
+            onClick={() => setOpen({ id: c.id, profile: p })}
+          >
+            <Avatar name={p?.full_name} size={48} expert={p?.is_expert} />
             <div className="conv-info">
-              <div className="conv-name-row">
-                <div className="conv-name">{other?.full_name || '—'}</div>
-                <div className="conv-time">{timeAgo(conv.last_msg_at)}</div>
+              <div className="conv-top">
+                <span className="conv-name">{p?.full_name || 'Профиль удалён'}</span>
+                <time className="conv-time">{timeAgo(c.last_msg_at)}</time>
               </div>
-              <div className="conv-preview">
-                {other?.position || other?.dzo || ''}
+              <div className="conv-role">
+                {[p?.position, dzoCore(p?.dzo, 2)].filter(Boolean).join(' · ')}
               </div>
-              {conv.last_message && (
-                <div className="conv-last">{conv.last_message}</div>
-              )}
+              {c.last_message && <div className="conv-last">{c.last_message}</div>}
             </div>
-          </div>
+          </button>
         )
       })}
+
+      {picker && (
+        <PeoplePicker
+          myId={myId}
+          onClose={() => setPicker(false)}
+          onPick={(p) => {
+            setPicker(false)
+            start(p)
+          }}
+        />
+      )}
     </>
   )
 }
 
-// Кнопка начать новый диалог — поиск пользователей
-function NewChatBtn({ myId, onSelect }) {
-  const [open, setOpen]       = useState(false)
-  const [q, setQ]             = useState('')
-  const [results, setResults] = useState([])
+function PeoplePicker({ myId, onClose, onPick }) {
+  const [q, setQ] = useState('')
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(false)
+  const reqId = useRef(0)
 
   useEffect(() => {
-    if (!q.trim()) { setResults([]); return }
+    if (!q.trim()) {
+      setRows([])
+      setLoading(false)
+      return
+    }
+    setLoading(true)
     const t = setTimeout(async () => {
-      const { data } = await supabase.from('profiles').select('id,full_name,position,dzo')
-        .ilike('full_name', `%${q}%`).neq('id', myId).limit(20)
-      setResults(data || [])
-    }, 300)
+      const id = ++reqId.current
+      const { data } = await searchPeopleByName(q, myId)
+      if (id !== reqId.current) return
+      setLoading(false)
+      setRows(data || [])
+    }, 280)
     return () => clearTimeout(t)
   }, [q, myId])
 
-  if (!open) return (
-    <button className="icon-btn" onClick={() => setOpen(true)} title="Новое сообщение">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-        <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
-      </svg>
-    </button>
-  )
-
   return (
-    <div className="modal-overlay" onClick={() => setOpen(false)}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div className="modal-title">
-          Новое сообщение
-          <button className="icon-btn" onClick={()=>setOpen(false)}><IconClose size={18}/></button>
-        </div>
-        <div className="search-field" style={{ marginBottom:12 }}>
-          <IconSearch size={16} color="var(--text3)" />
-          <input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Найти сотрудника..." />
-        </div>
-        {results.map(p => (
-          <div key={p.id} className="expert" style={{ padding:'10px 0' }}
-            onClick={() => { onSelect(p); setOpen(false) }}>
-            <div className="ava" style={{ background:avaColor(p.full_name), width:40, height:40, fontSize:14, flexShrink:0 }}>
-              {initials(p.full_name)}
-            </div>
-            <div>
-              <div style={{ fontSize:14, fontWeight:600 }}>{p.full_name}</div>
-              <div style={{ fontSize:12, color:'var(--text3)', marginTop:2 }}>
-                {[p.position, p.dzo].filter(Boolean).join(' · ')}
+    <Sheet title="Новое сообщение" onClose={onClose}>
+      <div className="search-box" style={{ marginBottom: 14 }}>
+        <IconSearch size={15} />
+        <input
+          className="search-input"
+          autoFocus
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Имя сотрудника"
+          aria-label="Поиск сотрудника"
+        />
+      </div>
+      {loading && <RowSkeleton count={3} />}
+      {!loading &&
+        rows.map((p) => (
+          <button type="button" className="person person-sm" key={p.id} onClick={() => onPick(p)}>
+            <Avatar name={p.full_name} size={40} />
+            <div className="person-info">
+              <div className="person-name">{p.full_name}</div>
+              <div className="person-meta">
+                <span>{[p.position, dzoCore(p.dzo, 2)].filter(Boolean).join(' · ')}</span>
               </div>
             </div>
-          </div>
+          </button>
         ))}
-        {q && results.length === 0 && (
-          <div className="empty-sub" style={{ padding:'16px 0' }}>Никого не нашли</div>
-        )}
-      </div>
-    </div>
+      {!loading && q.trim() && rows.length === 0 && (
+        <EmptyState icon={IconSearch} text="Никого не нашли" />
+      )}
+    </Sheet>
   )
 }
 
-// Экран чата
-function Chat({ conv, myId, onBack, onOpenProfile }) {
+function Chat({ conv, myId, onBack, onOpenProfile, onUnreadChange }) {
   const [messages, setMessages] = useState(null)
-  const [text, setText]         = useState('')
-  const [sending, setSending]   = useState(false)
-  const bottomRef               = useRef(null)
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+  const endRef = useRef(null)
+  const toast = useToast()
 
-  const load = useCallback(async () => {
-    const { data } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', conv.id)
-      .order('created_at', { ascending: true })
-    setMessages(data || [])
-
-    // Отмечаем прочитанными
-    await supabase.from('messages')
-      .update({ read: true })
-      .eq('conversation_id', conv.id)
-      .eq('read', false)
-      .neq('sender_id', myId)
-  }, [conv.id, myId])
-
-  useEffect(() => { load() }, [load])
-
-  // Scroll to bottom
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior:'smooth' })
+    let alive = true
+    listMessages(conv.id).then(({ data, error }) => {
+      if (!alive) return
+      if (error) return toast.error(error)
+      setMessages(data || [])
+    })
+    markMessagesRead(conv.id, myId).then(() => onUnreadChange?.())
+    return () => {
+      alive = false
+    }
+  }, [conv.id, myId, toast, onUnreadChange])
+
+  // Новое сообщение добавляется в список, а не перезагружает весь диалог:
+  // раньше каждая отправка стоила двух полных запросов.
+  useEffect(
+    () =>
+      subscribeToMessages(conv.id, (row) => {
+        setMessages((prev) => {
+          if (!prev) return prev
+          if (prev.some((m) => m.id === row.id)) return prev
+          return [...prev, row]
+        })
+        if (row.sender_id !== myId) markMessagesRead(conv.id, myId).then(() => onUnreadChange?.())
+      }),
+    [conv.id, myId, onUnreadChange],
+  )
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages])
 
-  // Realtime
-  useEffect(() => {
-    const ch = supabase.channel('chat-' + conv.id)
-      .on('postgres_changes', {
-        event:'INSERT', schema:'public', table:'messages',
-        filter:`conversation_id=eq.${conv.id}`
-      }, () => load())
-      .subscribe()
-    return () => supabase.removeChannel(ch)
-  }, [conv.id, load])
-
   const send = async () => {
-    if (!text.trim() || sending) return
-    setSending(true)
     const body = text.trim()
-    setText('')
-    await supabase.from('messages').insert({
-      conversation_id: conv.id,
-      sender_id: myId,
-      body,
-    })
-    await supabase.from('conversations').update({
-      last_message: body,
-      last_msg_at: new Date().toISOString(),
-    }).eq('id', conv.id)
+    if (!body || sending) return
+    setSending(true)
+    const { data, error } = await sendMessage(conv.id, myId, body)
     setSending(false)
-    load()
+    if (error) {
+      // Текст возвращается в поле — раньше он просто исчезал при сбое.
+      toast.error(error)
+      return
+    }
+    setText('')
+    if (data) {
+      setMessages((prev) => (prev?.some((m) => m.id === data.id) ? prev : [...(prev || []), data]))
+    }
   }
 
-  // Группировка по дате
-  const grouped = []
-  let lastDate = ''
+  const groups = []
+  let lastDay = ''
   for (const m of messages || []) {
-    const d = new Date(m.created_at).toLocaleDateString('ru', { day:'numeric', month:'long' })
-    if (d !== lastDate) { grouped.push({ type:'date', label:d }); lastDate = d }
-    grouped.push({ type:'msg', ...m })
+    const day = dateLabel(m.created_at)
+    if (day !== lastDay) {
+      groups.push({ kind: 'day', key: `d-${m.id}`, label: day })
+      lastDay = day
+    }
+    groups.push({ kind: 'msg', key: m.id, ...m })
   }
 
   return (
-    <div className="chat-wrap">
-      {/* Шапка чата */}
-      <div className="chat-header">
-        <button className="icon-btn" onClick={onBack}><IconBack size={19}/></button>
-        <div className="ava chat-ava"
-          style={{ background: avaColor(conv.profile?.full_name) }}
-          onClick={() => onOpenProfile(conv.profile?.id)}>
-          {initials(conv.profile?.full_name)}
-        </div>
-        <div className="chat-header-info" onClick={() => onOpenProfile(conv.profile?.id)}>
-          <div className="chat-name">{conv.profile?.full_name}</div>
-          <div className="chat-role">{conv.profile?.position || conv.profile?.dzo || ''}</div>
-        </div>
-      </div>
+    <div className="chat">
+      <header className="chat-bar">
+        <button type="button" className="icon-btn" onClick={onBack} aria-label="Назад к диалогам">
+          <IconBack size={19} />
+        </button>
+        <Avatar
+          name={conv.profile?.full_name}
+          size={38}
+          onClick={() => onOpenProfile(conv.profile?.id)}
+        />
+        <button type="button" className="chat-who" onClick={() => onOpenProfile(conv.profile?.id)}>
+          <span className="chat-name">{conv.profile?.full_name}</span>
+          <span className="chat-role">
+            {[conv.profile?.position, dzoCore(conv.profile?.dzo, 2)].filter(Boolean).join(' · ')}
+          </span>
+        </button>
+      </header>
 
-      {/* Сообщения */}
-      <div className="chat-messages">
-        {messages === null && <div className="spinner" />}
-        {messages?.length === 0 && (
-          <div className="empty-state" style={{ padding:'40px 24px' }}>
-            <div className="empty-icon">👋</div>
-            <div className="empty-sub">Начните диалог — напишите первое сообщение.</div>
+      <div className="chat-scroll">
+        {messages === null && (
+          <div className="center-pad">
+            <Spinner />
           </div>
         )}
-        {grouped.map((item, i) =>
-          item.type === 'date' ? (
-            <div key={'d'+i} className="chat-date-divider">{item.label}</div>
+        {messages?.length === 0 && (
+          <EmptyState
+            icon={IconHand}
+            text="Напишите первое сообщение — коллега получит уведомление."
+          />
+        )}
+        {groups.map((g) =>
+          g.kind === 'day' ? (
+            <div className="chat-day" key={g.key}>
+              {g.label}
+            </div>
           ) : (
-            <div key={item.id}
-              className={`chat-bubble-wrap ${item.sender_id === myId ? 'mine' : 'theirs'}`}>
-              <div className={`chat-bubble ${item.sender_id === myId ? 'mine' : 'theirs'}`}>
-                {item.body}
-                <span className="bubble-time">{timeExact(item.created_at)}</span>
+            <div className={`bubble-row ${g.sender_id === myId ? 'mine' : 'theirs'}`} key={g.key}>
+              <div className={`bubble ${g.sender_id === myId ? 'mine' : 'theirs'}`}>
+                {g.body}
+                <span className="bubble-time">{timeExact(g.created_at)}</span>
               </div>
             </div>
-          )
+          ),
         )}
-        <div ref={bottomRef} />
+        <div ref={endRef} />
       </div>
 
-      {/* Ввод */}
-      <div className="chat-input-row">
+      <div className="composer composer-chat">
         <input
+          className="composer-input"
           value={text}
-          onChange={e => setText(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
-          placeholder="Сообщение..."
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              send()
+            }
+          }}
+          placeholder="Сообщение…"
+          aria-label="Текст сообщения"
+          maxLength={4000}
         />
-        <button className="send-btn" onClick={send} disabled={!text.trim()}>
-          <IconSend size={16} />
+        <button
+          type="button"
+          className="send"
+          onClick={send}
+          disabled={!text.trim() || sending}
+          aria-label="Отправить"
+        >
+          {sending ? <Spinner size={16} inline /> : <IconSend size={17} />}
         </button>
       </div>
     </div>

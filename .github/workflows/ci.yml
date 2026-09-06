@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  check:
+    name: Линтер, тесты, сборка
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      - name: Линтер
+        run: npm run lint
+
+      - name: Проверка форматирования
+        run: npm run format:check
+
+      - name: Тесты
+        run: npm test
+
+      - name: Сборка
+        run: npm run build
+        env:
+          # Клиент падает без ключей уже на этапе импорта, поэтому сборке
+          # нужны заглушки. Настоящие значения задаются в Vercel.
+          VITE_SUPABASE_URL: https://example.supabase.co
+          VITE_SUPABASE_ANON_KEY: ci-placeholder-key

@@ -1,6 +1,35 @@
 import { useState } from 'react'
-import { supabase } from '../lib/supabase'
-import { IconClose, IconCase, IconQuestion } from '../components/Icons'
+import { createPost } from '../lib/db'
+import { parseList } from '../lib/format'
+import { IconCase, IconPost, IconQuestion } from './Icons'
+import Sheet from './ui/Sheet'
+import Button from './ui/Button'
+import { TextField, TextArea } from './ui/Field'
+import { useToast } from './ui/toast-context'
+
+const TYPES = [
+  {
+    key: 'post',
+    label: 'Пост',
+    Icon: IconPost,
+    hint: 'Новость, мысль или достижение — коротко и по делу.',
+  },
+  {
+    key: 'case',
+    label: 'Кейс',
+    Icon: IconCase,
+    hint: 'Что случилось, что пробовали, что сработало. Это останется в базе опыта.',
+  },
+  {
+    key: 'question',
+    label: 'Вопрос',
+    Icon: IconQuestion,
+    hint: 'Опишите ситуацию — подскажут коллеги с других предприятий.',
+  },
+]
+
+const MAX_TITLE = 200
+const MAX_BODY = 8000
 
 export default function NewPost({ myId, onClose, onPosted }) {
   const [type, setType] = useState('post')
@@ -8,66 +37,107 @@ export default function NewPost({ myId, onClose, onPosted }) {
   const [body, setBody] = useState('')
   const [tags, setTags] = useState('')
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
+  const [err, setErr] = useState('')
+  const toast = useToast()
+
+  const active = TYPES.find((t) => t.key === type)
 
   const publish = async () => {
-    if (!title.trim()) { setError('Заголовок обязателен'); return }
+    const t = title.trim()
+    if (!t) {
+      setErr('Заголовок обязателен')
+      return
+    }
+    setErr('')
     setSaving(true)
-    const { error: e } = await supabase.from('posts').insert({
+    const { error } = await createPost({
       author_id: myId,
       type,
-      title: title.trim(),
-      body: body.trim() || null,
-      tags: tags.split(',').map(t => t.trim()).filter(Boolean),
+      title: t.slice(0, MAX_TITLE),
+      body: body.trim().slice(0, MAX_BODY),
+      // Теги приводятся к нижнему регистру: иначе «Насосы» и «насосы»
+      // навсегда остаются разными тегами и поиск по ним разваливается.
+      tags: parseList(tags)
+        .map((x) => x.toLowerCase())
+        .slice(0, 8),
     })
     setSaving(false)
-    if (e) { setError(e.message); return }
+    if (error) {
+      setErr(error)
+      return
+    }
+    toast.success('Опубликовано')
     onPosted()
   }
 
-  const hint = {
-    post: 'Поделитесь новостью, мыслью или достижением',
-    case: 'Опишите проблему и как вы её решили — это останется в базе опыта',
-    question: 'Опишите ситуацию — коллеги из других ДЗО подскажут',
-  }[type]
+  const close = () => {
+    const dirty = title.trim() || body.trim() || tags.trim()
+    if (dirty && !window.confirm('Закрыть без публикации? Черновик не сохранится.')) return
+    onClose()
+  }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-title">
-          Новая публикация
-          <button className="icon-btn" onClick={onClose}><IconClose size={18} /></button>
-        </div>
-
-        <div className="type-row">
-          <button className={`type-opt ${type==='post'?'sel':''}`} onClick={() => setType('post')}>Пост</button>
-          <button className={`type-opt ${type==='case'?'sel':''}`} onClick={() => setType('case')}>Кейс</button>
-          <button className={`type-opt ${type==='question'?'sel':''}`} onClick={() => setType('question')}>Вопрос</button>
-        </div>
-
-        <div style={{fontSize:12, color:'var(--text3)', marginBottom:12}}>{hint}</div>
-
-        {error && <div className="auth-error">{error}</div>}
-
-        <div className="field">
-          <label>Заголовок</label>
-          <input value={title} onChange={e => setTitle(e.target.value)}
-            placeholder={type === 'question' ? 'Кто сталкивался с...' : type === 'case' ? 'Как мы решили проблему с...' : 'О чём расскажете?'} />
-        </div>
-        <div className="field">
-          <label>Текст</label>
-          <textarea value={body} onChange={e => setBody(e.target.value)}
-            placeholder={type === 'case' ? 'Ситуация → Что пробовали → Что сработало' : 'Подробности...'} />
-        </div>
-        <div className="field">
-          <label>Теги (через запятую)</label>
-          <input value={tags} onChange={e => setTags(e.target.value)} placeholder="насосы, Siemens, бурение" />
-        </div>
-
-        <button className="btn-primary" style={{margin:'4px 0 0', width:'100%'}} disabled={saving} onClick={publish}>
-          {saving ? 'Публикуем...' : 'Опубликовать'}
-        </button>
+    <Sheet
+      title="Новая публикация"
+      onClose={close}
+      footer={
+        <Button variant="primary" size="lg" className="w-full" loading={saving} onClick={publish}>
+          Опубликовать
+        </Button>
+      }
+    >
+      <div className="type-picker" role="radiogroup" aria-label="Тип публикации">
+        {TYPES.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="radio"
+            aria-checked={type === t.key}
+            className={`type-opt ${type === t.key ? 'type-opt-on' : ''}`}
+            onClick={() => setType(t.key)}
+          >
+            <t.Icon size={17} />
+            <span>{t.label}</span>
+          </button>
+        ))}
       </div>
-    </div>
+      <p className="type-hint">{active.hint}</p>
+
+      {err && (
+        <div className="banner banner-error" role="alert">
+          {err}
+        </div>
+      )}
+
+      <TextField
+        label="Заголовок"
+        required
+        maxLength={MAX_TITLE}
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder={
+          type === 'question'
+            ? 'Кто сталкивался с…'
+            : type === 'case'
+              ? 'Как мы решили проблему с…'
+              : 'О чём расскажете?'
+        }
+      />
+      <TextArea
+        label="Текст"
+        rows={7}
+        maxLength={MAX_BODY}
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        placeholder={type === 'case' ? 'Ситуация → что пробовали → что сработало' : 'Подробности…'}
+      />
+      <TextField
+        label="Теги"
+        hint="Через запятую. По ним вас найдут коллеги."
+        value={tags}
+        onChange={(e) => setTags(e.target.value)}
+        placeholder="насосы, siemens, бурение"
+      />
+    </Sheet>
   )
 }

@@ -1,190 +1,276 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
-import { Logo } from '../components/Icons'
+import { useEffect, useState } from 'react'
+import { auth, listDzo } from '../lib/db'
+import { isValidEmail } from '../lib/format'
+import { Logo, IconAlert, IconCheckCircle, IconBack } from '../components/Icons'
+import { TextField, SelectField } from '../components/ui/Field'
+import Button from '../components/ui/Button'
+
+const MIN_PASSWORD = 8
 
 export default function Auth() {
   const [mode, setMode] = useState('signin')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [password2, setPassword2] = useState('')
-  const [lastName, setLastName] = useState('')
-  const [firstName, setFirstName] = useState('')
-  const [middleName, setMiddleName] = useState('')
-  const [dzo, setDzo] = useState('')
-  const [specialty, setSpecialty] = useState('')
   const [dzoList, setDzoList] = useState([])
+  const [f, setF] = useState({
+    email: '',
+    password: '',
+    password2: '',
+    lastName: '',
+    firstName: '',
+    middleName: '',
+    dzo: '',
+    specialty: '',
+  })
+  const [touched, setTouched] = useState({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
 
   useEffect(() => {
-    supabase.from('dzo_list').select('name').order('sort')
-      .then(({ data }) => setDzoList((data || []).map(d => d.name)))
+    let alive = true
+    listDzo().then(({ data }) => {
+      if (alive && data) setDzoList(data)
+    })
+    return () => {
+      alive = false
+    }
   }, [])
 
-  const submit = async () => {
-    setError(''); setInfo('')
-    setLoading(true)
-    try {
-      if (mode === 'signin') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
-      } else {
-        if (!lastName.trim() || !firstName.trim()) throw new Error('Укажите фамилию и имя')
-        if (password.length < 6) throw new Error('Пароль минимум 6 символов')
-        if (password !== password2) throw new Error('Пароли не совпадают')
+  const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }))
+  const blur = (k) => () => setTouched((p) => ({ ...p, [k]: true }))
 
-        const full_name = [lastName, firstName, middleName]
-          .map(s => s.trim()).filter(Boolean).join(' ')
+  // Проверки считаются на каждый рендер, но показываются только после
+  // расфокуса поля — иначе форма краснеет ещё до первого ввода.
+  const errors = {}
+  if (!isValidEmail(f.email)) errors.email = 'Введите корректный email'
+  if (mode !== 'reset') {
+    if (f.password.length < MIN_PASSWORD) errors.password = `Минимум ${MIN_PASSWORD} символов`
+  }
+  if (mode === 'signup') {
+    if (!f.lastName.trim()) errors.lastName = 'Укажите фамилию'
+    if (!f.firstName.trim()) errors.firstName = 'Укажите имя'
+    if (f.password2 !== f.password) errors.password2 = 'Пароли не совпадают'
+    if (!f.dzo) errors.dzo = 'Выберите предприятие'
+  }
+  const show = (k) => (touched[k] ? errors[k] : undefined)
+  const valid = Object.keys(errors).length === 0
 
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { data: { full_name, dzo, specialty: specialty.trim() } },
-        })
-        if (error) throw error
-
-        if (!data.session) {
-          setInfo('Аккаунт создан. Проверьте почту и подтвердите email, затем войдите.')
-          setMode('signin')
-        }
-      }
-    } catch (e) {
-      setError(
-        e.message === 'Invalid login credentials' ? 'Неверный email или пароль'
-        : e.message === 'User already registered' ? 'Этот email уже зарегистрирован'
-        : e.message
-      )
+  const submit = async (e) => {
+    e?.preventDefault()
+    setError('')
+    setInfo('')
+    if (!valid) {
+      // Подсвечиваем всё, что не заполнено, вместо молчаливого бездействия.
+      setTouched(Object.fromEntries(Object.keys(errors).map((k) => [k, true])))
+      setError('Проверьте выделенные поля')
+      return
     }
+    setLoading(true)
+
+    if (mode === 'reset') {
+      const { error: e2 } = await auth.resetPassword(f.email)
+      setLoading(false)
+      if (e2) return setError(e2)
+      return setInfo('Письмо для сброса пароля отправлено. Проверьте почту.')
+    }
+
+    if (mode === 'signin') {
+      const { error: e2 } = await auth.signIn(f.email, f.password)
+      setLoading(false)
+      if (e2) setError(e2)
+      return
+    }
+
+    const full_name = [f.lastName, f.firstName, f.middleName]
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join(' ')
+    const { data, error: e2 } = await auth.signUp({
+      email: f.email,
+      password: f.password,
+      full_name,
+      dzo: f.dzo,
+      specialty: f.specialty.trim(),
+    })
     setLoading(false)
+    if (e2) return setError(e2)
+    if (!data?.session) {
+      setInfo('Аккаунт создан. Подтвердите email по ссылке из письма и войдите.')
+      setMode('signin')
+      setTouched({})
+    }
   }
 
-  const switchMode = (m) => { setMode(m); setError(''); setInfo(''); }
+  const go = (m) => {
+    setMode(m)
+    setError('')
+    setInfo('')
+    setTouched({})
+  }
 
   return (
-    <div className="auth-wrap">
-      <div className="auth-logo">
-        <Logo size={36} />
-        <div className="auth-title">KAP<span style={{color:'var(--accent)'}}>.</span>Connect</div>
-      </div>
-      <div className="auth-sub">
-        Профессиональная сеть сотрудников Казатомпрома.
-        Кейсы, вопросы, поиск экспертов по всем ДЗО.
-      </div>
-
-      {error && <div className="auth-error">{error}</div>}
-      {info && (
-        <div className="auth-error" style={{
-          background: 'rgba(61,190,122,0.12)',
-          borderColor: 'rgba(61,190,122,0.3)',
-          color: 'var(--green)'
-        }}>{info}</div>
-      )}
-
-      {mode === 'signup' && (
-        <>
-          <div className="field">
-            <label>Фамилия</label>
-            <input
-              value={lastName}
-              onChange={e => setLastName(e.target.value)}
-              placeholder="Фамилия"
-              autoComplete="family-name"
-            />
+    <div className="auth">
+      <div className="auth-card">
+        <div className="auth-brand">
+          <Logo size={40} />
+          <div className="auth-word">
+            KAP<span className="dot">.</span>Connect
           </div>
-          <div className="field">
-            <label>Имя</label>
-            <input
-              value={firstName}
-              onChange={e => setFirstName(e.target.value)}
-              placeholder="Имя"
-              autoComplete="given-name"
-            />
-          </div>
-          <div className="field">
-            <label>
-              Отчество{' '}
-              <span style={{fontWeight:400, textTransform:'none', color:'var(--text3)'}}>
-                (необязательно)
-              </span>
-            </label>
-            <input
-              value={middleName}
-              onChange={e => setMiddleName(e.target.value)}
-              placeholder="Отчество"
-              autoComplete="additional-name"
-            />
-          </div>
-          <div className="field">
-            <label>ДЗО</label>
-            <select value={dzo} onChange={e => setDzo(e.target.value)}>
-              <option value="">— выберите ДЗО —</option>
-              {dzoList.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          <div className="field">
-            <label>
-              Специальность{' '}
-              <span style={{fontWeight:400, textTransform:'none', color:'var(--text3)'}}>
-                (необязательно)
-              </span>
-            </label>
-            <input
-              value={specialty}
-              onChange={e => setSpecialty(e.target.value)}
-              placeholder="Например: КИПиА, буровик, механик"
-            />
-          </div>
-        </>
-      )}
-
-      <div className="field">
-        <label>Email</label>
-        <input
-          type="email"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          placeholder="Email"
-          autoComplete="email"
-        />
-      </div>
-      <div className="field">
-        <label>Пароль</label>
-        <input
-          type="password"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          placeholder="Минимум 6 символов"
-          autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-        />
-      </div>
-      {mode === 'signup' && (
-        <div className="field">
-          <label>Подтверждение пароля</label>
-          <input
-            type="password"
-            value={password2}
-            onChange={e => setPassword2(e.target.value)}
-            placeholder="Повторите пароль"
-            autoComplete="new-password"
-          />
         </div>
-      )}
+        <p className="auth-lead">
+          {mode === 'reset'
+            ? 'Укажите email — пришлём ссылку для восстановления доступа.'
+            : 'Профессиональная сеть сотрудников Казатомпрома. Кейсы, вопросы и поиск экспертов по всем предприятиям группы.'}
+        </p>
 
-      <button
-        className="btn-primary"
-        style={{margin: '8px 0 0', width: '100%'}}
-        disabled={loading}
-        onClick={submit}
-      >
-        {loading ? '...' : mode === 'signin' ? 'Войти' : 'Создать аккаунт'}
-      </button>
+        {error && (
+          <div className="banner banner-error" role="alert">
+            <IconAlert size={17} />
+            <span>{error}</span>
+          </div>
+        )}
+        {info && (
+          <div className="banner banner-ok" role="status">
+            <IconCheckCircle size={17} />
+            <span>{info}</span>
+          </div>
+        )}
 
-      <div className="auth-switch">
-        {mode === 'signin'
-          ? <>Нет аккаунта? <span onClick={() => switchMode('signup')}>Зарегистрироваться</span></>
-          : <>Уже есть аккаунт? <span onClick={() => switchMode('signin')}>Войти</span></>
-        }
+        <form onSubmit={submit} noValidate>
+          {mode === 'signup' && (
+            <>
+              <div className="grid-2">
+                <TextField
+                  label="Фамилия"
+                  required
+                  autoComplete="family-name"
+                  placeholder="Ахметов"
+                  value={f.lastName}
+                  onChange={set('lastName')}
+                  onBlur={blur('lastName')}
+                  error={show('lastName')}
+                />
+                <TextField
+                  label="Имя"
+                  required
+                  autoComplete="given-name"
+                  placeholder="Ерлан"
+                  value={f.firstName}
+                  onChange={set('firstName')}
+                  onBlur={blur('firstName')}
+                  error={show('firstName')}
+                />
+              </div>
+              <TextField
+                label="Отчество"
+                autoComplete="additional-name"
+                placeholder="Серикович"
+                value={f.middleName}
+                onChange={set('middleName')}
+              />
+              <SelectField
+                label="Предприятие"
+                required
+                options={dzoList}
+                placeholder="— выберите предприятие —"
+                value={f.dzo}
+                onChange={set('dzo')}
+                onBlur={blur('dzo')}
+                error={show('dzo')}
+              />
+              <TextField
+                label="Должность"
+                placeholder="Слесарь КИПиА, буровой мастер, технолог"
+                hint="Поможет коллегам найти вас в поиске экспертов"
+                value={f.specialty}
+                onChange={set('specialty')}
+              />
+            </>
+          )}
+
+          <TextField
+            label="Email"
+            required
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            placeholder="name@kazatomprom.kz"
+            value={f.email}
+            onChange={set('email')}
+            onBlur={blur('email')}
+            error={show('email')}
+          />
+
+          {mode !== 'reset' && (
+            <TextField
+              label="Пароль"
+              required
+              type="password"
+              placeholder={`Минимум ${MIN_PASSWORD} символов`}
+              autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+              value={f.password}
+              onChange={set('password')}
+              onBlur={blur('password')}
+              error={show('password')}
+            />
+          )}
+
+          {mode === 'signup' && (
+            <TextField
+              label="Повторите пароль"
+              required
+              type="password"
+              autoComplete="new-password"
+              placeholder="Ещё раз"
+              value={f.password2}
+              onChange={set('password2')}
+              onBlur={blur('password2')}
+              error={show('password2')}
+            />
+          )}
+
+          <Button
+            type="submit"
+            variant="primary"
+            size="lg"
+            loading={loading}
+            className="w-full mt-2"
+          >
+            {mode === 'signin'
+              ? 'Войти'
+              : mode === 'signup'
+                ? 'Создать аккаунт'
+                : 'Отправить письмо'}
+          </Button>
+        </form>
+
+        <div className="auth-links">
+          {mode === 'signin' && (
+            <>
+              <button type="button" className="link" onClick={() => go('reset')}>
+                Забыли пароль?
+              </button>
+              <span className="auth-sep">
+                Нет аккаунта?{' '}
+                <button type="button" className="link link-strong" onClick={() => go('signup')}>
+                  Зарегистрироваться
+                </button>
+              </span>
+            </>
+          )}
+          {mode === 'signup' && (
+            <span className="auth-sep">
+              Уже есть аккаунт?{' '}
+              <button type="button" className="link link-strong" onClick={() => go('signin')}>
+                Войти
+              </button>
+            </span>
+          )}
+          {mode === 'reset' && (
+            <button type="button" className="link link-back" onClick={() => go('signin')}>
+              <IconBack size={15} /> Назад ко входу
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

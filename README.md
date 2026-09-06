@@ -1,59 +1,51 @@
-# KAP Connect — пилотный проект
+# KAP Connect
 
 Профессиональная социальная сеть для сотрудников АО «НАК «Казатомпром».
-Профили специалистов · Лента (посты, кейсы, вопросы) · Поиск экспертов · Сообщества.
+Профили специалистов, лента кейсов и вопросов, поиск экспертов, сообщества,
+личные сообщения.
 
-**Стек:** React + Vite · Supabase (Auth + Postgres + RLS) · Vercel
+**Стек:** React 18 + Vite · Supabase (Auth + Postgres + RLS + Realtime) · Vercel
 
 ---
 
-## Запуск за 15 минут
+## Быстрый старт
 
 ### 1. Supabase
 
-1. Зайди на [supabase.com](https://supabase.com) → New project
-2. Назови `kap-connect`, выбери регион (Frankfurt ближе всего к КЗ)
-3. Открой **SQL Editor** → New query → вставь содержимое `supabase/schema.sql` → **Run**
-4. Открой **Authentication → Providers → Email** — убедись что включён
-5. **Authentication → Settings**: отключи "Confirm email" для пилота (иначе нужен SMTP)
-6. Скопируй из **Settings → API**:
-   - `Project URL`
-   - `anon public` ключ
+1. [supabase.com](https://supabase.com) → **New project**, регион Frankfurt.
+2. **SQL Editor** → New query → вставьте целиком `supabase/schema.sql` → **Run**.
+   Скрипт идемпотентный: его можно выполнять повторно после обновлений.
+3. **Authentication → Providers → Email** — включите.
+4. **Authentication → Settings** — оставьте подтверждение email включённым.
+   Профиль создаётся триггером автоматически, ручных шагов не нужно.
+5. **Settings → API** — скопируйте `Project URL` и ключ `anon public`.
 
 ### 2. Локальный запуск
 
 ```bash
-git clone https://github.com/Alivantiz/kap-connect.git
-cd kap-connect
 npm install
-
-# создай .env
-cp .env.example .env
-# впиши свои ключи в .env
-
+cp .env.example .env      # впишите свои ключи
 npm run dev
 ```
 
-### 3. GitHub
+### 3. Vercel
 
-```bash
-git init
-git add .
-git commit -m "KAP Connect MVP"
-git remote add origin https://github.com/Alivantiz/kap-connect.git
-git push -u origin main
-```
+Импортируйте репозиторий, фреймворк определится сам. В **Environment Variables**
+добавьте `VITE_SUPABASE_URL` и `VITE_SUPABASE_ANON_KEY`.
 
-### 4. Vercel
+---
 
-1. [vercel.com](https://vercel.com) → Add New → Project → импортируй репо `kap-connect`
-2. Framework: Vite (определится сам)
-3. **Environment Variables** — добавь:
-   - `VITE_SUPABASE_URL` = Project URL
-   - `VITE_SUPABASE_ANON_KEY` = anon ключ
-4. Deploy
+## Команды
 
-Готово — у тебя боевой URL вида `kap-connect.vercel.app`.
+| Команда | Что делает |
+|---|---|
+| `npm run dev` | Дев-сервер |
+| `npm run build` | Продакшн-сборка |
+| `npm test` | Тесты (Vitest + Testing Library) |
+| `npm run test:watch` | Тесты в режиме наблюдения |
+| `npm run lint` | ESLint, ноль предупреждений |
+| `npm run format` | Prettier |
+| `npm run check` | Линтер + тесты + сборка — то же, что в CI |
 
 ---
 
@@ -61,40 +53,67 @@ git push -u origin main
 
 ```
 src/
-  components/
-    Icons.jsx      — кастомный набор иконок (гексагональный стиль)
-    NewPost.jsx    — модалка создания публикации
-  screens/
-    Auth.jsx       — вход / регистрация (email + пароль)
-    Feed.jsx       — лента с фильтрами, лайки, комментарии
-    Search.jsx     — поиск экспертов по навыку/ДЗО/оборудованию
-    Communities.jsx— сообщества по специальности и ДЗО
-    Profile.jsx    — профиль + редактирование
   lib/
-    supabase.js    — клиент
+    supabase.js    — клиент, падает с понятным текстом без ключей
+    db.js          — слой данных: единая обработка ошибок, RPC вместо склейки строк
+    format.js      — форматтеры: ФИО, ДЗО, время, склонения
+    postTypes.js   — описание типов публикаций
+  components/
+    Icons.jsx      — интерфейсные иконки
+    DomainIcons.jsx— отраслевые знаки: КИПиА, бурение, химия, энергетика…
+    PostCard.jsx   — карточка публикации
+    CommentsSheet.jsx — ответы и отметка решения
+    NewPost.jsx    — создание публикации
+    ErrorBoundary.jsx — экран вместо белой страницы при сбое
+    ui/            — Avatar, Sheet, Button, Field, Toast, Skeleton, EmptyState
+  screens/
+    Auth, Feed, Search, Communities, Messages, Activity, Profile
+  test/            — 83 теста: реальные клики, ввод, проверка запросов
 supabase/
-  schema.sql       — таблицы, RLS, стартовые сообщества
+  schema.sql       — таблицы, индексы, триггеры, RLS, RPC, представления
 ```
 
 ## База данных
 
 | Таблица | Что хранит |
 |---|---|
-| `profiles` | ФИО, должность, ДЗО, регион, специальность, навыки, оборудование, Telegram |
-| `posts` | публикации: post / case / question, теги |
-| `post_likes` | лайки |
-| `comments` | ответы (с флагом is_solution) |
-| `communities` | сообщества по специальности и ДЗО |
-| `community_members` | участники |
+| `profiles` | ФИО, должность, предприятие, регион, навыки, оборудование, Telegram |
+| `posts` | публикации: пост / кейс / вопрос, теги, признак решённости |
+| `post_likes` | оценки |
+| `comments` | ответы, отметка решения |
+| `communities` / `community_members` | сообщества и участники |
+| `conversations` / `messages` | личная переписка |
+| `notifications` | события: оценка, ответ, решение, сообщение |
+| `dzo_list` | справочник предприятий группы |
 
-RLS: все авторизованные читают всё, пишут/правят только своё.
+Ключевые функции в базе:
 
-## Что дальше (после пилота)
+- `handle_new_user()` — создаёт профиль сразу после регистрации.
+- `search_profiles(q, dzo)` — поиск по имени, должности, **навыкам и оборудованию**.
+- `get_or_create_conversation(other_id)` — открывает диалог атомарно, без дублей.
+- `mark_solution(comment_id)` — автор вопроса отмечает чужой ответ решением.
+- `unread_message_count()` — непрочитанные только в своих диалогах.
+- Триггеры создают уведомления и обновляют превью диалога.
 
-- [ ] Реакция «Решено» — автор вопроса отмечает лучший ответ
-- [ ] Лента сообщества (посты внутри группы)
-- [ ] Push-уведомления (OneSignal / FCM)
-- [ ] Рейтинг экспертов по активности
-- [ ] Фото в постах (Supabase Storage)
-- [ ] PWA-манифест для установки на домашний экран
-- [ ] Интеграция с AD КАПа (SSO) — на этапе масштабирования
+RLS включён на всех таблицах. Представления объявлены с `security_invoker = true`,
+иначе они выполняются с правами владельца и обходят политики. Право на изменение
+`is_expert` у пользователей отозвано: статус назначает администратор.
+
+## Дизайн
+
+Тёмная тема, мобильный макет до 480px. Токены в `src/index.css`.
+Контраст текста и элементов проверен по WCAG AA: цвет вспомогательного текста
+даёт не меньше 4.63:1 на всех уровнях фона, белый на основной кнопке — 5.51:1.
+
+Эмодзи в интерфейсе не используются: все знаки, включая отраслевые для
+сообществ, нарисованы как SVG на единой сетке 24×24. Они наследуют цвет темы,
+одинаково выглядят на всех платформах и масштабируются вместе с текстом.
+
+## Что дальше
+
+- [ ] Лента внутри сообщества
+- [ ] Push-уведомления
+- [ ] Фотографии в публикациях (Supabase Storage)
+- [ ] Рейтинг экспертов по принятым решениям
+- [ ] Оффлайн-режим и установка как приложение
+- [ ] Вход через корпоративный каталог (SSO)

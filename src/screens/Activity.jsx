@@ -1,108 +1,130 @@
-import { useState, useEffect, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
-import { IconHeart, IconComment, IconCheck } from '../components/Icons'
+import { useCallback, useEffect, useState } from 'react'
+import { listNotifications, markNotificationsRead } from '../lib/db'
+import { dzoCore, timeAgo, truncate } from '../lib/format'
+import { IconCheck, IconComment, IconEmptyBell, IconHeart, IconMessages } from '../components/Icons'
+import Avatar from '../components/ui/Avatar'
+import EmptyState from '../components/ui/EmptyState'
+import { RowSkeleton } from '../components/ui/Skeleton'
+import { useToast } from '../components/ui/toast-context'
 
-const AVA_COLORS = ['#3A6BA8','#2E7D52','#8B5E1A','#5B3EA6','#7A3030','#1A6B6B','#4A6B1A','#6B1A5B']
-const avaColor = (name) => AVA_COLORS[(name?.charCodeAt(0)||0) % AVA_COLORS.length]
-const initials = (name) => (name||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase()
-
-const timeAgo = (iso) => {
-  const s = (Date.now() - new Date(iso).getTime()) / 1000
-  if (s < 60) return 'сейчас'
-  if (s < 3600) return Math.floor(s/60) + 'м'
-  if (s < 86400) return Math.floor(s/3600) + 'ч'
-  if (s < 604800) return Math.floor(s/86400) + 'д'
-  return new Date(iso).toLocaleDateString('ru', { day:'numeric', month:'short' })
+const KINDS = {
+  like: { Icon: IconHeart, tone: 'tone-red', text: 'оценил вашу публикацию' },
+  comment: { Icon: IconComment, tone: 'tone-accent', text: 'ответил на вашу публикацию' },
+  solution: { Icon: IconCheck, tone: 'tone-green', text: 'отметил ваш ответ решением' },
+  message: { Icon: IconMessages, tone: 'tone-accent', text: 'написал вам сообщение' },
 }
 
-const TYPE_CONFIG = {
-  like:     { Icon: IconHeart,   color: 'var(--red)',    text: 'оценил ваш пост' },
-  comment:  { Icon: IconComment, color: 'var(--accent)', text: 'ответил на ваш пост' },
-  solution: { Icon: IconCheck,   color: 'var(--green)',  text: 'отметил ваш ответ как решение' },
-}
+const TABS = [
+  { key: 'all', label: 'Все' },
+  { key: 'like', label: 'Оценки' },
+  { key: 'comment', label: 'Ответы' },
+  { key: 'solution', label: 'Решения' },
+]
 
 export default function Activity({ myId, onOpenProfile, onRead }) {
-  const [notifs, setNotifs] = useState(null)
+  const [items, setItems] = useState(null)
   const [filter, setFilter] = useState('all')
+  const toast = useToast()
 
-  const load = useCallback(async () => {
-    const { data } = await supabase
-      .from('notifications')
-      .select(`
-        *,
-        actor:profiles!notifications_actor_id_fkey(id,full_name,position),
-        post:posts(title)
-      `)
-      .eq('user_id', myId)
-      .order('created_at', { ascending: false })
-      .limit(50)
-    setNotifs(data || [])
+  // Загрузка и отметка прочитанного разделены. Раньше они были в одном
+  // useCallback вместе с нестабильным onRead, поэтому каждый тик таймера
+  // в App перезапрашивал 50 строк и повторно слал UPDATE.
+  useEffect(() => {
+    let alive = true
+    listNotifications(myId).then(({ data, error }) => {
+      if (!alive) return
+      if (error) return toast.error(error)
+      setItems(data || [])
+    })
+    return () => {
+      alive = false
+    }
+  }, [myId, toast])
 
-    // Отмечаем все прочитанными
-    await supabase.from('notifications')
-      .update({ read: true })
-      .eq('user_id', myId).eq('read', false)
-    onRead?.()
+  useEffect(() => {
+    markNotificationsRead(myId).then(({ error }) => {
+      if (!error) onRead?.()
+    })
   }, [myId, onRead])
 
-  useEffect(() => { load() }, [load])
+  const openActor = useCallback(
+    (id) => {
+      // Если автор удалён, join вернёт null. Раньше undefined доходил
+      // до App и открывал СВОЙ профиль без кнопки «назад».
+      if (id) onOpenProfile(id)
+    },
+    [onOpenProfile],
+  )
 
-  const filtered = filter === 'all'
-    ? (notifs || [])
-    : (notifs || []).filter(n => n.type === filter)
+  const shown = filter === 'all' ? items || [] : (items || []).filter((n) => n.type === filter)
 
   return (
     <>
-      <div className="screen-header">
-        <div className="screen-title">Активность</div>
+      <div className="screen-bar">
+        <h1 className="screen-title">Активность</h1>
       </div>
 
-      <div className="seg">
-        <button className={`seg-btn ${filter==='all'?'active':''}`} onClick={()=>setFilter('all')}>Все</button>
-        <button className={`seg-btn ${filter==='like'?'active':''}`} onClick={()=>setFilter('like')}>Лайки</button>
-        <button className={`seg-btn ${filter==='comment'?'active':''}`} onClick={()=>setFilter('comment')}>Ответы</button>
+      <div className="segmented" role="tablist" aria-label="Фильтр уведомлений">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={filter === t.key}
+            className={`seg ${filter === t.key ? 'seg-on' : ''}`}
+            onClick={() => setFilter(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {notifs === null && <div className="spinner" />}
+      {items === null && <RowSkeleton count={5} />}
 
-      {notifs?.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-icon">🔔</div>
-          <div className="empty-title">Нет уведомлений</div>
-          <div className="empty-sub">Когда коллеги ответят на ваши посты или оценят их — вы увидите это здесь.</div>
-        </div>
+      {items?.length === 0 && (
+        <EmptyState
+          icon={IconEmptyBell}
+          title="Нет уведомлений"
+          text="Здесь появятся ответы на ваши публикации, оценки коллег и отметки решений."
+        />
       )}
 
-      {filtered.map(n => {
-        const cfg = TYPE_CONFIG[n.type] || TYPE_CONFIG.comment
-        const Icon = cfg.Icon
+      {/* Раньше пустое состояние проверяло весь список, а рендерился
+          отфильтрованный: при выборе вкладки без событий экран был пустым. */}
+      {items?.length > 0 && shown.length === 0 && (
+        <EmptyState icon={IconEmptyBell} text="В этой категории пока пусто." />
+      )}
+
+      {shown.map((n) => {
+        const k = KINDS[n.type] || KINDS.comment
+        const { Icon } = k
+        const actor = n.actor
         return (
-          <div
+          <button
+            type="button"
+            className={`notif ${n.read ? '' : 'notif-new'}`}
             key={n.id}
-            className={`notif-item ${!n.read ? 'unread' : ''}`}
-            onClick={() => onOpenProfile(n.actor?.id)}
+            onClick={() => openActor(actor?.id)}
           >
-            <div style={{ position:'relative', flexShrink:0 }}>
-              <div className="ava" style={{ background: avaColor(n.actor?.full_name), width:44, height:44, fontSize:15 }}>
-                {initials(n.actor?.full_name)}
-              </div>
-              <div className="notif-icon-badge" style={{ background: cfg.color }}>
-                <Icon size={10} color="#fff" />
-              </div>
+            <div className="notif-ava">
+              <Avatar name={actor?.full_name} size={44} />
+              <span className={`notif-kind ${k.tone}`}>
+                <Icon size={11} />
+              </span>
             </div>
             <div className="notif-info">
-              <div className="notif-text">
-                <span className="notif-name">{n.actor?.full_name}</span>
-                {' '}{cfg.text}
+              <p className="notif-text">
+                <span className="notif-name">{actor?.full_name || 'Пользователь'}</span> {k.text}
+              </p>
+              {n.post?.title && <div className="notif-post">«{truncate(n.post.title, 64)}»</div>}
+              <div className="notif-meta">
+                {[dzoCore(actor?.dzo, 2), timeAgo(n.created_at)].filter(Boolean).join(' · ')}
               </div>
-              {n.post?.title && (
-                <div className="notif-post">«{n.post.title.slice(0, 60)}{n.post.title.length > 60 ? '…' : ''}»</div>
-              )}
-              <div className="notif-time">{timeAgo(n.created_at)}</div>
             </div>
-          </div>
+          </button>
         )
       })}
+      <div style={{ height: 20 }} />
     </>
   )
 }

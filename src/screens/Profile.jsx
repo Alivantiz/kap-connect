@@ -1,171 +1,244 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
-import { IconBack, IconStar, IconTelegram, IconLogout, IconClose, IconWrench, IconBriefcase, IconLocation } from '../components/Icons'
+import { useCallback, useEffect, useState } from 'react'
+import { getProfile, getProfileStats, listDzo, updateProfile, auth } from '../lib/db'
+import { cleanTelegram, dzoCore, parseList } from '../lib/format'
+import {
+  IconBack,
+  IconBriefcase,
+  IconEdit,
+  IconIdea,
+  IconLocation,
+  IconLogout,
+  IconMessages,
+  IconStar,
+  IconTelegram,
+  IconAlert,
+  IconRefresh,
+} from '../components/Icons'
+import Avatar from '../components/ui/Avatar'
+import Button from '../components/ui/Button'
+import Sheet from '../components/ui/Sheet'
+import EmptyState from '../components/ui/EmptyState'
+import { TextField, TextArea, SelectField } from '../components/ui/Field'
+import { RowSkeleton } from '../components/ui/Skeleton'
+import { useToast } from '../components/ui/toast-context'
 
-const AVA_COLORS = ['#3A6BA8','#2E7D52','#8B5E1A','#5B3EA6','#7A3030','#1A6B6B','#4A6B1A','#6B1A5B']
-const avaColor  = (name) => AVA_COLORS[(name?.charCodeAt(0)||0) % AVA_COLORS.length]
-const initials  = (name) => (name||'?').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase()
-
-const dzoCore = (dzo) => {
-  if (!dzo) return ''
-  return dzo
-    .replace(/^(АО|ТОО|СП|ДП|ЗАО)\s*/gi, '')
-    .replace(/«(СП|АО|ТОО|ДП)\s*/gi, '«')
-    .replace(/[«»""]/g, '')
-    .replace(/\(.*?\)/g, '')
-    .trim()
-}
-
-export default function Profile({ profileId, isMe, onBack, myProfile, onProfileSaved }) {
+export default function Profile({ profileId, isMe, onBack, onProfileSaved, onMessage }) {
   const [profile, setProfile] = useState(null)
-  const [stats, setStats]     = useState({ posts: 0, answers: 0 })
+  const [stats, setStats] = useState(null)
+  const [error, setError] = useState('')
   const [editing, setEditing] = useState(false)
+  const toast = useToast()
 
-  useEffect(() => {
+  const load = useCallback(async () => {
+    setError('')
     setProfile(null)
-    supabase.from('profiles').select('*').eq('id', profileId).single()
-      .then(({ data }) => setProfile(data))
-
-    Promise.all([
-      supabase.from('posts').select('id', { count:'exact', head:true }).eq('author_id', profileId),
-      supabase.from('comments').select('id', { count:'exact', head:true }).eq('author_id', profileId),
-    ]).then(([p, c]) => setStats({ posts: p.count||0, answers: c.count||0 }))
+    const [p, s] = await Promise.all([getProfile(profileId), getProfileStats(profileId)])
+    return { p, s }
   }, [profileId])
 
-  if (!profile) return <div className="spinner" />
+  // Гонка запросов: при быстром переходе между профилями старый ответ
+  // мог прийти вторым и подменить данные нового человека.
+  useEffect(() => {
+    let alive = true
+    load().then(({ p, s }) => {
+      if (!alive) return
+      if (p.error) return setError(p.error)
+      if (!p.data) return setError('Профиль не найден. Возможно, он ещё не создан.')
+      setProfile(p.data)
+      setStats(s.data || null)
+    })
+    return () => {
+      alive = false
+    }
+  }, [load])
+
+  if (error) {
+    return (
+      <>
+        {onBack && (
+          <div className="screen-bar">
+            <button type="button" className="icon-btn" onClick={onBack} aria-label="Назад">
+              <IconBack size={19} />
+            </button>
+          </div>
+        )}
+        <EmptyState
+          icon={IconAlert}
+          title="Профиль недоступен"
+          text={error}
+          action={
+            <Button variant="ghost" icon={IconRefresh} onClick={() => setError('')}>
+              Повторить
+            </Button>
+          }
+        />
+      </>
+    )
+  }
+
+  if (!profile) return <RowSkeleton count={3} />
+
+  const role = profile.position || profile.specialty
+  const incomplete =
+    isMe && !profile.position && !profile.bio && (profile.skills?.length || 0) === 0
 
   return (
     <>
-      <div className="profile-header">
-        {onBack && (
-          <button className="icon-btn" style={{ marginBottom:12 }} onClick={onBack}>
+      {onBack && (
+        <div className="screen-bar">
+          <button type="button" className="icon-btn" onClick={onBack} aria-label="Назад">
             <IconBack size={19} />
           </button>
-        )}
-        <div className="profile-row">
-          <div className="profile-ava" style={{ background: avaColor(profile.full_name) }}>
-            {initials(profile.full_name)}
-          </div>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div className="profile-name">{profile.full_name}</div>
-            {profile.position && (
-              <div className="profile-role">{profile.position}</div>
-            )}
-            <div className="profile-dzo-row">
-              {profile.dzo && (
-                <span className="profile-meta-item">
-                  <IconLocation size={11} color="var(--text3)" />
-                  {dzoCore(profile.dzo)}
-                </span>
-              )}
-              {profile.region && (
-                <span className="profile-meta-item">
-                  · {profile.region}
-                </span>
-              )}
-            </div>
-            {profile.is_expert && (
-              <div className="expert-pill">
-                <IconStar size={12} active /> Эксперт
-              </div>
-            )}
-          </div>
         </div>
+      )}
 
-        <div className="profile-stats">
-          <div className="pstat">
-            <div className="pstat-val">{stats.posts}</div>
-            <div className="pstat-key">публикаций</div>
-          </div>
-          <div className="pstat">
-            <div className="pstat-val">{stats.answers}</div>
-            <div className="pstat-key">ответов</div>
-          </div>
-          <div className="pstat">
-            <div className="pstat-val">{profile.experience_years || '—'}</div>
-            <div className="pstat-key">лет стажа</div>
-          </div>
-          <div className="pstat">
-            <div className="pstat-val" style={{ fontSize:13 }}>
-              {profile.region ? profile.region.split(/[\s,]/)[0] : '—'}
+      <header className="prof-head">
+        <Avatar name={profile.full_name} size={76} expert={profile.is_expert} />
+        <div className="prof-id">
+          <h1 className="prof-name">{profile.full_name}</h1>
+          {role && (
+            <div className="prof-role">
+              <IconBriefcase size={13} /> {role}
             </div>
-            <div className="pstat-key">место работы</div>
-          </div>
+          )}
+          {(profile.dzo || profile.region) && (
+            <div className="prof-place">
+              <IconLocation size={13} />
+              {[dzoCore(profile.dzo), profile.region].filter(Boolean).join(' · ')}
+            </div>
+          )}
+          {profile.is_expert && (
+            <span className="expert-pill">
+              <IconStar size={12} active /> Эксперт
+            </span>
+          )}
+        </div>
+      </header>
+
+      <div className="prof-stats">
+        <div className="stat">
+          <div className="stat-val">{stats?.posts_count ?? 0}</div>
+          <div className="stat-key">публикаций</div>
+        </div>
+        <div className="stat">
+          <div className="stat-val">{stats?.answers_count ?? 0}</div>
+          <div className="stat-key">ответов</div>
+        </div>
+        <div className="stat">
+          <div className="stat-val">{stats?.solutions_count ?? 0}</div>
+          <div className="stat-key">решений</div>
+        </div>
+        <div className="stat">
+          <div className="stat-val">{profile.experience_years || '—'}</div>
+          <div className="stat-key">лет стажа</div>
         </div>
       </div>
 
       {profile.bio && (
-        <div className="profile-section">
-          <div className="ps-label">О себе</div>
-          <div className="bio-text">{profile.bio}</div>
-        </div>
+        <section className="prof-block">
+          <h2 className="block-label">О себе</h2>
+          <p className="bio">{profile.bio}</p>
+        </section>
       )}
 
       {profile.skills?.length > 0 && (
-        <div className="profile-section">
-          <div className="ps-label">Навыки</div>
-          <div className="skill-wrap">
+        <section className="prof-block">
+          <h2 className="block-label">Навыки</h2>
+          <div className="chips">
             {profile.skills.map((s, i) => (
-              <span className={`skill ${i < 3 ? 'hi' : ''}`} key={s}>{s}</span>
+              <span className={`chip ${i < 3 ? 'chip-hi' : ''}`} key={`${s}-${i}`}>
+                {s}
+              </span>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       {profile.equipment?.length > 0 && (
-        <div className="profile-section">
-          <div className="ps-label">Оборудование</div>
-          <div className="skill-wrap">
-            {profile.equipment.map(s => (
-              <span className="skill" key={s}>{s}</span>
+        <section className="prof-block">
+          <h2 className="block-label">Оборудование</h2>
+          <div className="chips">
+            {profile.equipment.map((s, i) => (
+              <span className="chip" key={`${s}-${i}`}>
+                {s}
+              </span>
             ))}
           </div>
+        </section>
+      )}
+
+      {incomplete && (
+        <div className="nudge">
+          <IconIdea size={19} />
+          <span>
+            Заполните профиль — должность, навыки и оборудование. По ним коллеги находят вас в
+            поиске экспертов.
+          </span>
         </div>
       )}
 
-      {isMe && !profile.position && !profile.bio && (profile.skills?.length||0) === 0 && (
-        <div className="profile-section">
-          <div style={{
-            background: 'rgba(74,144,217,0.08)',
-            border: '1px dashed rgba(74,144,217,0.3)',
-            borderRadius: 12, padding: '14px 16px',
-            fontSize: 13, color: 'var(--text3)', lineHeight: 1.5,
-          }}>
-            💡 Заполните профиль — укажите должность, навыки и оборудование.
-            Так коллеги смогут найти вас через поиск.
-          </div>
-        </div>
-      )}
+      <div className="prof-actions">
+        {isMe ? (
+          <>
+            <Button
+              variant="primary"
+              size="lg"
+              icon={IconEdit}
+              className="w-full"
+              onClick={() => setEditing(true)}
+            >
+              Редактировать профиль
+            </Button>
+            <Button
+              variant="ghost"
+              size="md"
+              icon={IconLogout}
+              className="w-full"
+              onClick={() => auth.signOut()}
+            >
+              Выйти
+            </Button>
+          </>
+        ) : (
+          <>
+            {/* Раньше App передавал onMessage, но Profile его не принимал:
+                написать человеку из его профиля было невозможно. */}
+            <Button
+              variant="primary"
+              size="lg"
+              icon={IconMessages}
+              className="w-full"
+              onClick={() => onMessage?.(profile)}
+            >
+              Написать сообщение
+            </Button>
+            {profile.telegram && (
+              <a
+                className="btn btn-ghost btn-md w-full"
+                href={`https://t.me/${cleanTelegram(profile.telegram)}`}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                <IconTelegram size={17} />
+                <span>Telegram</span>
+              </a>
+            )}
+          </>
+        )}
+      </div>
 
-      {!isMe && profile.telegram && (
-        <a className="btn-primary"
-          style={{ textDecoration:'none', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}
-          href={`https://t.me/${profile.telegram.replace('@','')}`}
-          target="_blank" rel="noreferrer">
-          <IconTelegram size={18} /> Написать в Telegram
-        </a>
-      )}
-
-      {isMe && (
-        <>
-          <button className="btn-primary" onClick={() => setEditing(true)}>
-            Редактировать профиль
-          </button>
-          <button className="btn-ghost"
-            style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}
-            onClick={() => supabase.auth.signOut()}>
-            <IconLogout size={16} /> Выйти
-          </button>
-        </>
-      )}
-
-      <div style={{ height:20 }} />
+      <div style={{ height: 24 }} />
 
       {editing && (
         <EditProfile
           profile={profile}
           onClose={() => setEditing(false)}
-          onSaved={(p) => { setProfile(p); onProfileSaved?.(p); setEditing(false) }}
+          onSaved={(p) => {
+            setProfile(p)
+            onProfileSaved?.(p)
+            setEditing(false)
+            toast.success('Профиль сохранён')
+          }}
         />
       )}
     </>
@@ -174,124 +247,140 @@ export default function Profile({ profileId, isMe, onBack, myProfile, onProfileS
 
 function EditProfile({ profile, onClose, onSaved }) {
   const [dzoList, setDzoList] = useState([])
-
-  useEffect(() => {
-    supabase.from('dzo_list').select('name').order('sort')
-      .then(({ data }) => setDzoList((data||[]).map(d => d.name)))
-  }, [])
-
+  const [dzoReady, setDzoReady] = useState(false)
   const [f, setF] = useState({
-    full_name:        profile.full_name        || '',
-    position:         profile.position         || '',  // должность (она же специальность)
-    dzo:              profile.dzo              || '',
-    region:           profile.region           || '',  // место работы (рудник, офис...)
-    experience_years: profile.experience_years || '',
-    bio:              profile.bio              || '',
-    skills:           (profile.skills    || []).join(', '),
-    equipment:        (profile.equipment || []).join(', '),
-    telegram:         profile.telegram         || '',
+    full_name: profile.full_name || '',
+    position: profile.position || '',
+    dzo: profile.dzo || '',
+    region: profile.region || '',
+    experience_years: profile.experience_years ? String(profile.experience_years) : '',
+    bio: profile.bio || '',
+    skills: (profile.skills || []).join(', '),
+    equipment: (profile.equipment || []).join(', '),
+    telegram: profile.telegram || '',
   })
   const [saving, setSaving] = useState(false)
-  const [error,  setError]  = useState('')
+  const [err, setErr] = useState('')
 
-  const set = (k) => (e) => setF(prev => ({ ...prev, [k]: e.target.value }))
+  useEffect(() => {
+    listDzo().then(({ data }) => {
+      // Пока справочник не загружен, список ДЗО пуст. Раньше select в этот
+      // момент показывал пустое значение, и любое касание стирало ДЗО из профиля.
+      const list = data || []
+      setDzoList(profile.dzo && !list.includes(profile.dzo) ? [profile.dzo, ...list] : list)
+      setDzoReady(true)
+    })
+  }, [profile.dzo])
+
+  const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }))
 
   const save = async () => {
-    if (!f.full_name.trim()) { setError('Имя обязательно'); return }
+    if (!f.full_name.trim()) return setErr('Имя обязательно')
+    const years = f.experience_years === '' ? 0 : Number(f.experience_years)
+    if (!Number.isFinite(years) || years < 0 || years > 70) return setErr('Стаж — число от 0 до 70')
+    setErr('')
     setSaving(true)
-
-    const upd = {
-      full_name:        f.full_name.trim(),
-      position:         f.position.trim()  || null,
-      specialty:        f.position.trim()  || null,  // дублируем в specialty для фильтров
-      dzo:              f.dzo              || null,
-      region:           f.region.trim()    || null,
-      bio:              f.bio.trim()       || null,
-      telegram:         f.telegram.trim().replace('@','') || null,
-      experience_years: parseInt(f.experience_years) || 0,
-      skills:           f.skills.split(',').map(s=>s.trim()).filter(Boolean),
-      equipment:        f.equipment.split(',').map(s=>s.trim()).filter(Boolean),
-    }
-
-    const { data, error: e } = await supabase
-      .from('profiles').update(upd).eq('id', profile.id).select().single()
+    const role = f.position.trim()
+    const { data, error } = await updateProfile(profile.id, {
+      full_name: f.full_name.trim(),
+      position: role || null,
+      specialty: role || null,
+      dzo: f.dzo || null,
+      region: f.region.trim() || null,
+      bio: f.bio.trim() || null,
+      telegram: cleanTelegram(f.telegram) || null,
+      experience_years: years,
+      skills: parseList(f.skills),
+      equipment: parseList(f.equipment),
+    })
     setSaving(false)
-    if (e) { setError(e.message); return }
-    if (data) onSaved(data)
+    if (error) return setErr(error)
+    onSaved(data)
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-title">
-          Редактировать профиль
-          <button className="icon-btn" onClick={onClose}><IconClose size={18} /></button>
+    <Sheet
+      title="Редактировать профиль"
+      onClose={onClose}
+      size="tall"
+      footer={
+        <Button variant="primary" size="lg" className="w-full" loading={saving} onClick={save}>
+          Сохранить
+        </Button>
+      }
+    >
+      {err && (
+        <div className="banner banner-error" role="alert">
+          {err}
         </div>
-
-        {error && <div className="auth-error">{error}</div>}
-
-        <div className="field">
-          <label>Полное имя</label>
-          <input value={f.full_name} onChange={set('full_name')}
-            placeholder="Фамилия Имя Отчество" />
-        </div>
-
-        <div className="field">
-          <label>Должность</label>
-          <input value={f.position} onChange={set('position')}
-            placeholder="Инженер связи, слесарь КИПиА, буровой мастер..." />
-        </div>
-
-        <div className="field">
-          <label>ДЗО</label>
-          <select value={f.dzo} onChange={set('dzo')}>
-            <option value="">— выберите ДЗО —</option>
-            {dzoList.map(d => <option key={d} value={d}>{d}</option>)}
-          </select>
-        </div>
-
-        <div className="field">
-          <label>Место работы</label>
-          <input value={f.region} onChange={set('region')}
-            placeholder="Рудник Орталык, Центральный офис, Жанатас..." />
-        </div>
-
-        <div className="field">
-          <label>Стаж (лет)</label>
-          <input type="number" min="0" max="60"
-            value={f.experience_years} onChange={set('experience_years')}
-            placeholder="0" />
-        </div>
-
-        <div className="field">
-          <label>О себе</label>
-          <textarea value={f.bio} onChange={set('bio')}
-            placeholder="Кратко о вашем опыте и чем можете помочь коллегам" />
-        </div>
-
-        <div className="field">
-          <label>Навыки <span style={{fontWeight:400,color:'var(--text3)'}}>через запятую</span></label>
-          <input value={f.skills} onChange={set('skills')}
-            placeholder="TIA Portal, Profibus, SCADA" />
-        </div>
-
-        <div className="field">
-          <label>Оборудование <span style={{fontWeight:400,color:'var(--text3)'}}>через запятую</span></label>
-          <input value={f.equipment} onChange={set('equipment')}
-            placeholder="Siemens S7-300, Burkert 8694" />
-        </div>
-
-        <div className="field">
-          <label>Telegram <span style={{fontWeight:400,color:'var(--text3)'}}>без @</span></label>
-          <input value={f.telegram} onChange={set('telegram')} placeholder="username" />
-        </div>
-
-        <button className="btn-primary" style={{ margin:'4px 0 0', width:'100%' }}
-          disabled={saving} onClick={save}>
-          {saving ? 'Сохраняем...' : 'Сохранить'}
-        </button>
-        <div style={{ height:8 }} />
-      </div>
-    </div>
+      )}
+      <TextField
+        label="Полное имя"
+        required
+        value={f.full_name}
+        onChange={set('full_name')}
+        placeholder="Фамилия Имя Отчество"
+      />
+      <TextField
+        label="Должность"
+        value={f.position}
+        onChange={set('position')}
+        placeholder="Слесарь КИПиА, буровой мастер, технолог"
+        hint="По ней вас находят в поиске экспертов"
+      />
+      <SelectField
+        label="Предприятие"
+        value={f.dzo}
+        onChange={set('dzo')}
+        options={dzoList}
+        disabled={!dzoReady}
+        placeholder={dzoReady ? '— не выбрано —' : 'Загружаем справочник…'}
+      />
+      <TextField
+        label="Место работы"
+        value={f.region}
+        onChange={set('region')}
+        placeholder="Рудник Орталык, Центральный офис"
+      />
+      <TextField
+        label="Стаж, лет"
+        type="number"
+        min="0"
+        max="70"
+        inputMode="numeric"
+        value={f.experience_years}
+        onChange={set('experience_years')}
+        placeholder="0"
+      />
+      <TextArea
+        label="О себе"
+        rows={4}
+        value={f.bio}
+        onChange={set('bio')}
+        placeholder="Кратко об опыте и о том, чем можете помочь коллегам"
+        maxLength={1000}
+      />
+      <TextField
+        label="Навыки"
+        hint="Через запятую"
+        value={f.skills}
+        onChange={set('skills')}
+        placeholder="TIA Portal, Profibus, SCADA"
+      />
+      <TextField
+        label="Оборудование"
+        hint="Через запятую"
+        value={f.equipment}
+        onChange={set('equipment')}
+        placeholder="Siemens S7-300, Burkert 8694"
+      />
+      <TextField
+        label="Telegram"
+        hint="Без символа @"
+        value={f.telegram}
+        onChange={set('telegram')}
+        placeholder="username"
+      />
+    </Sheet>
   )
 }

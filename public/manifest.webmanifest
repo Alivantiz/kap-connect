@@ -1,0 +1,14 @@
+{
+  "name": "KAP Connect",
+  "short_name": "KAP Connect",
+  "description": "Профессиональная сеть сотрудников Казатомпрома",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B0D10",
+  "theme_color": "#0B0D10",
+  "lang": "ru",
+  "icons": [
+    { "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
