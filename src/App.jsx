@@ -143,19 +143,42 @@ function Shell() {
    * Аппаратная кнопка «назад» на Android закрывала приложение целиком.
    * Теперь она сначала снимает верхний слой: поиск, окно создания,
    * просмотр чужого профиля.
+   *
+   * Каждому открытому слою соответствует одна запись в истории. Если слой
+   * закрыли кнопкой в интерфейсе, запись нужно снять самим — иначе
+   * следующее нажатие «назад» уйдёт впустую и покажется, что кнопка залипла.
    */
   const layers = [searching, composing, !!viewProfile].filter(Boolean).length
   const prevLayers = useRef(0)
+  const nav = useRef({ skipPop: false, fromPop: false })
+
   useEffect(() => {
-    if (layers > prevLayers.current) window.history.pushState({ kap: layers }, '')
+    const g = nav.current
+    if (layers > prevLayers.current) {
+      window.history.pushState({ kap: layers }, '')
+    } else if (layers < prevLayers.current) {
+      if (g.fromPop) {
+        g.fromPop = false // запись уже снял сам браузер
+      } else {
+        g.skipPop = true
+        window.history.back()
+      }
+    }
     prevLayers.current = layers
   }, [layers])
 
   useEffect(() => {
     const onPop = () => {
+      const g = nav.current
+      if (g.skipPop) {
+        g.skipPop = false
+        return
+      }
+      if (!searching && !composing && !viewProfile) return
+      g.fromPop = true
       if (searching) return setSearching(false)
       if (composing) return setComposing(false)
-      if (viewProfile) return closeProfile()
+      return closeProfile()
     }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
