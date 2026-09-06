@@ -26,9 +26,11 @@ export default function Avatar({ name, size = 40, onClick, expert = false, class
       {content}
     </button>
   ) : (
-    <div className={`ava ${className}`} style={style} role="img" aria-label={label}>
+    // span, а не div: аватар часто лежит внутри <button> строки списка,
+    // а кнопка по спецификации может содержать только строчное содержимое.
+    <span className={`ava ${className}`} style={style} role="img" aria-label={label}>
       {content}
-    </div>
+    </span>
   )
 
   if (!expert) return inner

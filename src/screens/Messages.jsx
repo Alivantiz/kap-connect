@@ -152,16 +152,16 @@ export default function Messages({
             onClick={() => setOpen({ id: c.id, profile: p })}
           >
             <Avatar name={p?.full_name} size={48} expert={p?.is_expert} />
-            <div className="conv-info">
-              <div className="conv-top">
+            <span className="conv-info">
+              <span className="conv-top">
                 <span className="conv-name">{p?.full_name || 'Профиль удалён'}</span>
                 <time className="conv-time">{timeAgo(c.last_msg_at)}</time>
-              </div>
-              <div className="conv-role">
+              </span>
+              <span className="conv-role">
                 {[p?.position, dzoCore(p?.dzo, 2)].filter(Boolean).join(' · ')}
-              </div>
-              {c.last_message && <div className="conv-last">{c.last_message}</div>}
-            </div>
+              </span>
+              {c.last_message && <span className="conv-last">{c.last_message}</span>}
+            </span>
           </button>
         )
       })}
@@ -221,12 +221,12 @@ function PeoplePicker({ myId, onClose, onPick }) {
         rows.map((p) => (
           <button type="button" className="person person-sm" key={p.id} onClick={() => onPick(p)}>
             <Avatar name={p.full_name} size={40} />
-            <div className="person-info">
-              <div className="person-name">{p.full_name}</div>
-              <div className="person-meta">
+            <span className="person-info">
+              <span className="person-name">{p.full_name}</span>
+              <span className="person-meta">
                 <span>{[p.position, dzoCore(p.dzo, 2)].filter(Boolean).join(' · ')}</span>
-              </div>
-            </div>
+              </span>
+            </span>
           </button>
         ))}
       {!loading && q.trim() && rows.length === 0 && (

@@ -106,21 +106,21 @@ export default function Activity({ myId, onOpenProfile, onRead }) {
             key={n.id}
             onClick={() => openActor(actor?.id)}
           >
-            <div className="notif-ava">
+            <span className="notif-ava">
               <Avatar name={actor?.full_name} size={44} />
               <span className={`notif-kind ${k.tone}`}>
                 <Icon size={11} />
               </span>
-            </div>
-            <div className="notif-info">
+            </span>
+            <span className="notif-info">
               <p className="notif-text">
                 <span className="notif-name">{actor?.full_name || 'Пользователь'}</span> {k.text}
               </p>
-              {n.post?.title && <div className="notif-post">«{truncate(n.post.title, 64)}»</div>}
-              <div className="notif-meta">
+              {n.post?.title && <span className="notif-post">«{truncate(n.post.title, 64)}»</span>}
+              <span className="notif-meta">
                 {[dzoCore(actor?.dzo, 2), timeAgo(n.created_at)].filter(Boolean).join(' · ')}
-              </div>
-            </div>
+              </span>
+            </span>
           </button>
         )
       })}

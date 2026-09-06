@@ -218,9 +218,9 @@ export default function Search({ onOpenProfile, onClose }) {
                 onClick={() => onOpenProfile(p.id)}
               >
                 <Avatar name={p.full_name} size={46} expert={p.is_expert} />
-                <div className="person-info">
-                  <div className="person-name">{p.full_name}</div>
-                  <div className="person-meta">
+                <span className="person-info">
+                  <span className="person-name">{p.full_name}</span>
+                  <span className="person-meta">
                     {role && (
                       <span>
                         <IconBriefcase size={11} /> {role}
@@ -231,17 +231,17 @@ export default function Search({ onOpenProfile, onClose }) {
                         <IconLocation size={11} /> {dzoCore(p.dzo, 2)}
                       </span>
                     )}
-                  </div>
+                  </span>
                   {p.skills?.length > 0 && (
-                    <div className="chips chips-sm">
+                    <span className="chips chips-sm">
                       {p.skills.slice(0, 4).map((s, i) => (
                         <span className="chip" key={`${s}-${i}`}>
                           {s}
                         </span>
                       ))}
-                    </div>
+                    </span>
                   )}
-                </div>
+                </span>
               </button>
             )
           })}

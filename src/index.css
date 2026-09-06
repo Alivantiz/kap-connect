@@ -1689,6 +1689,7 @@ button {
   min-width: 0;
 }
 .person-name {
+  display: block;
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.008em;
@@ -1935,6 +1936,7 @@ button {
   gap: var(--s-2);
 }
 .conv-name {
+  display: block;
   flex: 1;
   min-width: 0;
   font-size: 15px;
@@ -1951,6 +1953,7 @@ button {
   font-variant-numeric: tabular-nums;
 }
 .conv-role {
+  display: block;
   margin-top: 1px;
   font-size: 12px;
   color: var(--text-3);
@@ -1959,6 +1962,7 @@ button {
   white-space: nowrap;
 }
 .conv-last {
+  display: block;
   margin-top: 4px;
   font-size: 14px;
   color: var(--text-2);
@@ -2162,6 +2166,7 @@ button {
   color: var(--text);
 }
 .notif-post {
+  display: block;
   margin-top: 3px;
   font-size: 13px;
   color: var(--text-3);
