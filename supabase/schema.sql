@@ -105,13 +105,6 @@ alter table public.communities add column if not exists creator_id uuid referenc
 alter table public.communities add column if not exists icon text not null default 'gear';
 alter table public.communities drop column if exists emoji;
 
--- Без уникальности имени повторный запуск скрипта дублировал все сообщества
-do $$
-begin
-  alter table public.communities add constraint communities_name_key unique (name);
-exception when duplicate_table or duplicate_object then null;
-end $$;
-
 -- Старый check-constraint не знал про 'interest' — пересоздаём
 alter table public.communities drop constraint if exists communities_kind_check;
 alter table public.communities add  constraint communities_kind_check check (kind in ('specialty','dzo','interest'));
@@ -122,6 +115,59 @@ create table if not exists public.community_members (
   joined_at    timestamptz default now(),
   primary key (community_id, user_id)
 );
+
+-- Прежний скрипт не был идемпотентным, а README предлагал запускать его
+-- повторно: у части установок сообщества задублированы. Перед вводом
+-- уникальности имени переносим участников на самую раннюю запись и убираем
+-- дубли, иначе ALTER TABLE упал бы и оборвал весь скрипт.
+do $$
+begin
+  if to_regclass('public.communities') is null
+     or to_regclass('public.community_members') is null then return; end if;
+
+  with dupes as (
+    select id,
+           first_value(id) over (partition by name order by created_at, id) as keep_id,
+           row_number()   over (partition by name order by created_at, id) as rn
+      from public.communities
+  )
+  update public.community_members m
+     set community_id = d.keep_id
+    from dupes d
+   where m.community_id = d.id
+     and d.rn > 1
+     and not exists (
+       select 1 from public.community_members x
+        where x.community_id = d.keep_id and x.user_id = m.user_id
+     );
+
+  delete from public.community_members m
+   using (
+     select id from (
+       select id, row_number() over (partition by name order by created_at, id) rn
+         from public.communities
+     ) t where rn > 1
+   ) d
+   where m.community_id = d.id;
+
+  delete from public.communities c
+   using (
+     select id from (
+       select id, row_number() over (partition by name order by created_at, id) rn
+         from public.communities
+     ) t where rn > 1
+   ) d
+   where c.id = d.id;
+end $$;
+
+do $$
+begin
+  alter table public.communities add constraint communities_name_key unique (name);
+exception
+  when duplicate_table or duplicate_object then null;
+  when unique_violation then
+    raise exception 'В таблице communities остались одинаковые названия — очистите их вручную';
+end $$;
 
 -- ═══════════════════════════════════════════════════════════════════
 -- ЛИЧНЫЕ СООБЩЕНИЯ
@@ -587,6 +633,13 @@ end $$;
 -- ═══════════════════════════════════════════════════════════════════
 -- СТАРТОВЫЕ СООБЩЕСТВА
 -- ═══════════════════════════════════════════════════════════════════
+-- Прежний сид называл предприятие «Байкен-У» с кириллической «У», новый
+-- использует латинскую «U», как в уставном названии. Без переименования
+-- обновление добавило бы второе сообщество с тем же смыслом.
+update public.communities set name = 'Байкен-U'
+ where name = 'Байкен-У'
+   and not exists (select 1 from public.communities c where c.name = 'Байкен-U');
+
 insert into public.communities (name, description, icon, kind) values
   ('КИПиА Казатомпром',   'Слесари и инженеры КИПиА всей группы КАП. Кейсы, вопросы, обмен опытом.',       'gauge',    'specialty'),
   ('Буровики КАП',        'Буровые мастера, операторы и инженеры ПРС всех дочерних предприятий.',          'drill',    'specialty'),

@@ -104,7 +104,7 @@ export default function Communities({ myId }) {
 
   const card = (c) => (
     <div className="comm" key={c.id}>
-      <div className={`comm-icon icon-${c.icon || 'gear'}`}>
+      <div className="comm-icon">
         <DomainIcon name={c.icon} size={22} />
       </div>
       <div className="comm-info">
