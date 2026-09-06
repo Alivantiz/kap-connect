@@ -26,6 +26,12 @@ export default function CommentsSheet({ post, myId, onClose, onOpenProfile, onCh
     load()
   }, [load])
 
+  // Прокрутка вниз после отрисовки списка: раньше она вызывалась сразу
+  // после загрузки и попадала на предыдущий последний ответ.
+  useEffect(() => {
+    if (comments?.length) endRef.current?.scrollIntoView({ block: 'end' })
+  }, [comments])
+
   const send = async () => {
     const body = text.trim()
     if (!body || sending) return
@@ -36,7 +42,6 @@ export default function CommentsSheet({ post, myId, onClose, onOpenProfile, onCh
     setText('')
     await load()
     onChanged?.()
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
   // Отметка решения идёт через RPC: автор вопроса меняет чужой комментарий,

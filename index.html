@@ -6,7 +6,13 @@
        возвращал ненулевые значения. Без него max() всегда падал в константу.
        maximum-scale и user-scalable убраны: iOS их игнорирует, а другим
        браузерам они запрещают масштабирование — это провал WCAG 1.4.4. -->
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <!-- interactive-widget=resizes-content: без него экранная клавиатура
+       наезжает на поле ввода в чате, потому что фиксированный слой на
+       изменение визуального вьюпорта не реагирует. -->
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
+  />
   <meta name="theme-color" content="#0B0D10" />
   <meta name="description" content="KAP Connect — профессиональная сеть сотрудников Казатомпрома: кейсы, вопросы и поиск экспертов по всем предприятиям группы." />
   <meta name="apple-mobile-web-app-capable" content="yes" />

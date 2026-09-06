@@ -52,7 +52,7 @@ export const dzoCore = (dzo, maxWords = 0) => {
   const core = String(dzo)
     .replace(/\(.*?\)/g, '')
     .replace(/(^|[«"\s])(АО|ТОО|СП|ДП|ЗАО)[\s»"]*/gi, '$1')
-    .replace(/[«»""]/g, '')
+    .replace(/[«»“”„"]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
   if (!maxWords) return core

@@ -29,6 +29,12 @@ export function humanError(error) {
   if (error.code === '23514') return 'Данные не прошли проверку'
   if (error.code === '42501' || raw.includes('row-level security'))
     return 'Недостаточно прав для этого действия'
+  if (error.code === '42703' || error.code === '42883')
+    return 'База данных устарела. Выполните supabase/schema.sql заново.'
+  if (error.code === 'PGRST116') return 'Запись не найдена или недоступна'
+  if (error.code === 'PGRST202') return 'Функция не найдена в базе. Обновите схему.'
+  if (error.code === 'PGRST301') return 'Сессия истекла. Войдите заново.'
+  if (error.code === 'PGRST100') return 'Некорректный запрос к серверу'
   if (raw.includes('Failed to fetch') || raw.includes('NetworkError'))
     return 'Нет связи с сервером. Проверьте интернет.'
   return raw
@@ -36,6 +42,18 @@ export function humanError(error) {
 
 const ok = (data) => ({ data, error: null })
 const fail = (error) => ({ data: null, error: humanError(error) })
+
+/**
+ * Запись, которая обязана затронуть хотя бы одну строку.
+ * PostgREST отвечает 204 без ошибки, когда политика RLS отсеяла все
+ * кандидаты, — прежде такое удаление выглядело как успешное, и карточка
+ * пропадала из списка, оставаясь в базе.
+ */
+async function mustAffect(promise) {
+  const r = await run(promise, [])
+  if (r.error) return r
+  return r.data?.length ? ok(r.data) : fail({ code: '42501' })
+}
 
 /** Оборачивает промис запроса: нормализует форму ответа и ловит сетевые сбои. */
 async function run(promise, fallback = null) {
@@ -134,7 +152,9 @@ export async function listFeed({ filter, me, limit = 40, before = null }) {
   if (filter === 'specialty') {
     const spec = me?.specialty || me?.position
     if (!spec) return ok([])
-    q = q.in('author_specialty', [spec])
+    // .eq(), а не .in(): postgrest-js не экранирует кавычки внутри значения,
+    // и должность вида «Слесарь КИПиА, "5 разряд"» давала битый фильтр.
+    q = q.eq('author_specialty', spec)
   }
   if (filter === 'questions') q = q.eq('type', 'question')
   if (filter === 'cases') q = q.eq('type', 'case')
@@ -157,7 +177,8 @@ export const createPost = ({ author_id, type, title, body, tags }) =>
       .single(),
   )
 
-export const deletePost = (id) => run(supabase.from('posts').delete().eq('id', id))
+export const deletePost = (id) =>
+  mustAffect(supabase.from('posts').delete().eq('id', id).select('id'))
 
 export const likePost = (postId, userId) =>
   run(supabase.from('post_likes').insert({ post_id: postId, user_id: userId }))
@@ -186,7 +207,8 @@ export const addComment = (postId, authorId, body) =>
       .single(),
   )
 
-export const deleteComment = (id) => run(supabase.from('comments').delete().eq('id', id))
+export const deleteComment = (id) =>
+  mustAffect(supabase.from('comments').delete().eq('id', id).select('id'))
 
 /**
  * Отметить ответ решением.
@@ -217,12 +239,13 @@ export const joinCommunity = (communityId, userId) =>
   run(supabase.from('community_members').insert({ community_id: communityId, user_id: userId }))
 
 export const leaveCommunity = (communityId, userId) =>
-  run(
+  mustAffect(
     supabase
       .from('community_members')
       .delete()
       .eq('community_id', communityId)
-      .eq('user_id', userId),
+      .eq('user_id', userId)
+      .select('community_id'),
   )
 
 export const createCommunity = (payload) =>
@@ -232,7 +255,8 @@ export const updateCommunity = (id, patch) =>
   run(supabase.from('communities').update(patch).eq('id', id).select().single())
 
 /** Участники удалятся каскадом по внешнему ключу — отдельный запрос не нужен. */
-export const deleteCommunity = (id) => run(supabase.from('communities').delete().eq('id', id))
+export const deleteCommunity = (id) =>
+  mustAffect(supabase.from('communities').delete().eq('id', id).select('id'))
 
 // ────────────────────────────── сообщения ───────────────────────────
 
@@ -350,6 +374,26 @@ export function subscribeToMessages(convId, onInsert) {
     )
     .subscribe()
   return () => supabase.removeChannel(channel)
+}
+
+/**
+ * Обновление списка диалогов.
+ * Прежняя версия слушала всю таблицу без фильтра, поэтому чужая переписка
+ * дёргала перезагрузку у каждого. Здесь два канала строго по своим строкам:
+ * PostgREST допускает только одно условие на подписку.
+ */
+export function subscribeToMyConversations(myId, onChange) {
+  const channels = ['user1_id', 'user2_id'].map((col) =>
+    supabase
+      .channel(`conversations:${col}:${myId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'conversations', filter: `${col}=eq.${myId}` },
+        onChange,
+      )
+      .subscribe(),
+  )
+  return () => channels.forEach((c) => supabase.removeChannel(c))
 }
 
 export function subscribeToMyNotifications(myId, onInsert) {

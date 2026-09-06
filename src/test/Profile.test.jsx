@@ -92,6 +92,19 @@ describe('Профиль', () => {
     expect(await screen.findByText('Профиль недоступен')).toBeInTheDocument()
   })
 
+  it('«Повторить» действительно перезапрашивает профиль', async () => {
+    // Кнопка только сбрасывала текст ошибки, запрос не повторялся,
+    // и экран навсегда оставался на скелетоне.
+    db.getProfile.mockReturnValueOnce(fail('Нет связи с сервером. Проверьте интернет.'))
+    db.getProfile.mockReturnValue(ok(profileFixture()))
+    const { user } = renderApp(<Profile profileId="me-1" isMe />)
+
+    await user.click(await screen.findByRole('button', { name: 'Повторить' }))
+
+    expect(db.getProfile).toHaveBeenCalledTimes(2)
+    expect(await screen.findByRole('heading', { name: /Ахметов/ })).toBeInTheDocument()
+  })
+
   it('показывает ошибку загрузки', async () => {
     db.getProfile.mockReturnValue(fail('Нет связи с сервером. Проверьте интернет.'))
     renderApp(<Profile profileId="me-1" isMe />)

@@ -65,6 +65,61 @@ describe('слой данных', () => {
     vi.resetModules()
   })
 
+  it('удаление, не затронувшее ни одной строки, считается неудачей', async () => {
+    // PostgREST отвечает 204 без ошибки, когда политика RLS отсеяла все
+    // строки. Прежде это выглядело как успех: карточка исчезала из списка,
+    // оставаясь в базе.
+    const builder = {
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockResolvedValue({ data: [], error: null }),
+    }
+    vi.doMock('../lib/supabase', () => ({ supabase: { from: () => builder } }))
+    vi.resetModules()
+    const { deletePost } = await import('../lib/db')
+
+    const { data, error } = await deletePost('p-1')
+
+    expect(data).toBeNull()
+    expect(error).toBe('Недостаточно прав для этого действия')
+    vi.doUnmock('../lib/supabase')
+    vi.resetModules()
+  })
+
+  it('удаление, затронувшее строку, считается успешным', async () => {
+    const builder = {
+      delete: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      select: vi.fn().mockResolvedValue({ data: [{ id: 'p-1' }], error: null }),
+    }
+    vi.doMock('../lib/supabase', () => ({ supabase: { from: () => builder } }))
+    vi.resetModules()
+    const { deletePost } = await import('../lib/db')
+
+    const { error } = await deletePost('p-1')
+
+    expect(error).toBeNull()
+    vi.doUnmock('../lib/supabase')
+    vi.resetModules()
+  })
+
+  it('подписка на диалоги фильтруется по своим строкам', async () => {
+    // Прежняя версия слушала таблицу целиком, и чужая переписка дёргала
+    // перезагрузку у каждого пользователя.
+    const on = vi.fn().mockReturnThis()
+    const channel = vi.fn(() => ({ on, subscribe: vi.fn().mockReturnThis() }))
+    vi.doMock('../lib/supabase', () => ({ supabase: { channel, removeChannel: vi.fn() } }))
+    vi.resetModules()
+    const { subscribeToMyConversations } = await import('../lib/db')
+
+    subscribeToMyConversations('me-1', () => {})
+
+    const filters = on.mock.calls.map(([, opts]) => opts.filter)
+    expect(filters).toEqual(['user1_id=eq.me-1', 'user2_id=eq.me-1'])
+    vi.doUnmock('../lib/supabase')
+    vi.resetModules()
+  })
+
   it('экранирует подстановочные знаки в поиске по имени', async () => {
     // Иначе «%» в запросе совпадает со всеми записями подряд.
     const builder = {

@@ -71,12 +71,16 @@ export default function Feed({ myId, myProfile, onOpenProfile, onNeedProfile }) 
     if (loadingMore || done || !posts?.length) return
     setLoadingMore(true)
     const last = posts[posts.length - 1]
+    // Та же защита, что и в load: без неё смена фильтра во время догрузки
+    // подмешивала страницу от предыдущего фильтра в новый список.
+    const id = ++reqId.current
     const { data, error: e } = await listFeed({
       filter,
       me: myProfile,
       limit: PAGE,
       before: last.created_at,
     })
+    if (id !== reqId.current) return
     setLoadingMore(false)
     if (e) return toast.error(e)
     const fresh = (data || []).filter((p) => !posts.some((x) => x.id === p.id))

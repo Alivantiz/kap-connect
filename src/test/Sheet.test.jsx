@@ -84,7 +84,8 @@ describe('Модальная шторка', () => {
     expect(trigger).toHaveFocus()
   })
 
-  it('блокирует прокрутку фона, пока окно открыто', () => {
+  it('блокирует прокрутку фона и возвращает прежнее значение', () => {
+    document.body.style.overflow = 'scroll'
     const { unmount } = renderApp(
       <Sheet title="Окно" onClose={() => {}}>
         <button type="button">Внутри</button>
@@ -92,6 +93,9 @@ describe('Модальная шторка', () => {
     )
     expect(document.body.style.overflow).toBe('hidden')
     unmount()
-    expect(document.body.style.overflow).not.toBe('hidden')
+    // Именно прежнее значение, а не пустая строка: иначе окно ломало бы
+    // прокрутку страницы, настроенную до его открытия.
+    expect(document.body.style.overflow).toBe('scroll')
+    document.body.style.overflow = ''
   })
 })

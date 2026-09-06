@@ -36,6 +36,7 @@ beforeEach(() => {
     ok([{ id: 'other-2', full_name: 'Сериков Данияр', position: 'Механик', dzo: 'АО «Орталык»' }]),
   )
   db.subscribeToMessages.mockReturnValue(() => {})
+  db.subscribeToMyConversations.mockReturnValue(() => {})
 })
 
 const view = (props = {}) => renderApp(<Messages myId="me-1" onOpenProfile={() => {}} {...props} />)
@@ -109,6 +110,14 @@ describe('Сообщения', () => {
 
     await user.type(screen.getByLabelText('Поиск по диалогам'), 'Сериков')
     expect(await screen.findByText(/диалогов нет/)).toBeInTheDocument()
+  })
+
+  it('подписывается на обновления списка диалогов', async () => {
+    // Без подписки входящее сообщение не меняло превью и не поднимало
+    // диалог наверх, пока экран не перемонтируют.
+    view()
+    await screen.findByText('Бекова Айгуль')
+    expect(db.subscribeToMyConversations).toHaveBeenCalledWith('me-1', expect.any(Function))
   })
 
   it('показывает пустое состояние без диалогов', async () => {

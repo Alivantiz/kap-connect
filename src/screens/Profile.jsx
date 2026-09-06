@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getProfile, getProfileStats, listDzo, updateProfile, auth } from '../lib/db'
 import { cleanTelegram, dzoCore, parseList } from '../lib/format'
 import {
@@ -28,19 +28,17 @@ export default function Profile({ profileId, isMe, onBack, onProfileSaved, onMes
   const [error, setError] = useState('')
   const [editing, setEditing] = useState(false)
   const toast = useToast()
-
-  const load = useCallback(async () => {
-    setError('')
-    setProfile(null)
-    const [p, s] = await Promise.all([getProfile(profileId), getProfileStats(profileId)])
-    return { p, s }
-  }, [profileId])
+  // Счётчик попыток. Раньше «Повторить» только сбрасывал текст ошибки,
+  // запрос не повторялся, и экран навсегда застревал на скелетоне.
+  const [attempt, setAttempt] = useState(0)
 
   // Гонка запросов: при быстром переходе между профилями старый ответ
   // мог прийти вторым и подменить данные нового человека.
   useEffect(() => {
     let alive = true
-    load().then(({ p, s }) => {
+    setError('')
+    setProfile(null)
+    Promise.all([getProfile(profileId), getProfileStats(profileId)]).then(([p, s]) => {
       if (!alive) return
       if (p.error) return setError(p.error)
       if (!p.data) return setError('Профиль не найден. Возможно, он ещё не создан.')
@@ -50,7 +48,7 @@ export default function Profile({ profileId, isMe, onBack, onProfileSaved, onMes
     return () => {
       alive = false
     }
-  }, [load])
+  }, [profileId, attempt])
 
   if (error) {
     return (
@@ -67,7 +65,7 @@ export default function Profile({ profileId, isMe, onBack, onProfileSaved, onMes
           title="Профиль недоступен"
           text={error}
           action={
-            <Button variant="ghost" icon={IconRefresh} onClick={() => setError('')}>
+            <Button variant="ghost" icon={IconRefresh} onClick={() => setAttempt((n) => n + 1)}>
               Повторить
             </Button>
           }

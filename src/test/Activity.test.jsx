@@ -45,8 +45,12 @@ describe('Активность', () => {
     await screen.findByText('Бекова Айгуль')
     expect(db.listNotifications).toHaveBeenCalledTimes(1)
 
+    const readCalls = db.markNotificationsRead.mock.calls.length
+
     rerender(<Activity myId="me-1" onOpenProfile={() => {}} onRead={() => {}} />)
     await waitFor(() => expect(db.listNotifications).toHaveBeenCalledTimes(1))
+    // Отметка прочитанного — тоже запись в базу, и она не должна повторяться.
+    expect(db.markNotificationsRead).toHaveBeenCalledTimes(readCalls)
   })
 
   it('показывает подсказку во вкладке без событий, а не пустой экран', async () => {

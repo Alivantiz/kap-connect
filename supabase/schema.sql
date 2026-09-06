@@ -86,6 +86,13 @@ create table if not exists public.comments (
   created_at  timestamptz default now()
 );
 
+-- Миграция: create table if not exists не трогает уже созданные таблицы,
+-- поэтому колонки, добавленные позже, нужно доводить явно. Без этого на
+-- обновлённой базе падал триггер updated_at (то есть любое сохранение
+-- профиля) и функция mark_solution.
+alter table public.profiles add column if not exists updated_at timestamptz default now();
+alter table public.posts    add column if not exists is_solved  boolean default false;
+
 -- ═══════════════════════════════════════════════════════════════════
 -- СООБЩЕСТВА
 -- ═══════════════════════════════════════════════════════════════════
@@ -247,13 +254,25 @@ begin
   insert into public.profiles (id, full_name, dzo, specialty, position)
   values (
     new.id,
-    coalesce(nullif(trim(new.raw_user_meta_data->>'full_name'), ''), split_part(new.email,'@',1)),
+    -- email может быть пустым (телефон, часть OAuth-провайдеров). Раньше
+    -- full_name уходил в NULL, вставка падала, и вся регистрация
+    -- откатывалась с невнятным «Database error saving new user».
+    coalesce(
+      nullif(trim(new.raw_user_meta_data->>'full_name'), ''),
+      nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
+      'Без имени'
+    ),
     nullif(new.raw_user_meta_data->>'dzo', ''),
     nullif(new.raw_user_meta_data->>'specialty', ''),
     nullif(new.raw_user_meta_data->>'specialty', '')
   )
   on conflict (id) do nothing;
   return new;
+exception
+  -- Сбой при создании профиля не должен отменять саму регистрацию.
+  when others then
+    raise warning 'Не удалось создать профиль для %: %', new.id, sqlerrm;
+    return new;
 end $$;
 
 drop trigger if exists on_auth_user_created on auth.users;
@@ -345,20 +364,15 @@ create trigger on_comment_solution after update of is_solution on public.comment
 create or replace function public.on_message_sent()
 returns trigger language plpgsql security definer set search_path = public
 as $$
-declare other uuid;
 begin
   update public.conversations
      set last_message = left(new.body, 200), last_msg_at = new.created_at
    where id = new.conversation_id;
 
-  select case when user1_id = new.sender_id then user2_id else user1_id end
-    into other
-    from public.conversations where id = new.conversation_id;
-
-  if other is not null and other <> new.sender_id then
-    insert into public.notifications (user_id, actor_id, type)
-    values (other, new.sender_id, 'message');
-  end if;
+  -- Уведомление о сообщении намеренно не создаётся: непрочитанные уже
+  -- считает unread_message_count() для вкладки «Чаты». Иначе одна активная
+  -- переписка за полсотни строк вытесняла из «Активности» все ответы,
+  -- оценки и решения, а событие поднимало сразу два счётчика.
   return new;
 end $$;
 
@@ -425,6 +439,12 @@ begin
     from public.comments c join public.posts po on po.id = c.post_id
    where c.id = target_comment and po.author_id = me;
   if p is null then raise exception 'Отмечать решение может только автор вопроса'; end if;
+
+  -- Повторный вызов на уже отмеченном ответе раньше снимал и ставил флаг
+  -- заново, из-за чего уходило второе уведомление.
+  if exists (select 1 from public.comments where id = target_comment and is_solution) then
+    return;
+  end if;
 
   update public.comments set is_solution = false where post_id = p and is_solution;
   update public.comments set is_solution = true  where id = target_comment;
@@ -525,8 +545,11 @@ create policy "like"       on public.post_likes for insert to authenticated with
 create policy "unlike"     on public.post_likes for delete to authenticated using (auth.uid() = user_id);
 
 -- ── comments ──
--- update намеренно НЕ разрешён напрямую: отметка решения идёт через
--- mark_solution(), иначе автор поста не смог бы изменить чужой комментарий.
+-- Отметка решения идёт только через mark_solution(): она проверяет, что
+-- вызывающий — автор вопроса. Политика «update own comments» этой проверке
+-- противоречила: со своим комментарием пользователь мог выставить
+-- is_solution сам, на чужом вопросе. Права на колонку отозваны ниже,
+-- поэтому редактировать можно только текст.
 drop policy if exists "read comments"       on public.comments;
 drop policy if exists "insert own comments" on public.comments;
 drop policy if exists "update own comments" on public.comments;
@@ -608,6 +631,19 @@ grant  update (full_name, position, dzo, region, specialty, experience_years,
                bio, skills, equipment, telegram)
   on public.profiles to authenticated;
 
+-- Отзыва прав на UPDATE мало: у аккаунта без строки в profiles (а такие
+-- есть у всех, кто зарегистрировался до появления триггера) оставался
+-- путь через INSERT с is_expert = true.
+revoke insert on public.profiles from authenticated;
+grant  insert (id, full_name, position, dzo, region, specialty,
+               experience_years, bio, skills, equipment, telegram)
+  on public.profiles to authenticated;
+
+-- Аналогично для ответов: менять можно только текст, признак решения
+-- ставится исключительно функцией mark_solution().
+revoke update on public.comments from authenticated;
+grant  update (body) on public.comments to authenticated;
+
 -- Представления не должны читаться без авторизации
 revoke all on public.feed_posts      from anon;
 revoke all on public.community_stats from anon;
@@ -625,9 +661,11 @@ end $$;
 
 do $$
 begin
-  begin alter publication supabase_realtime add table public.messages;      exception when duplicate_object then null; end;
-  begin alter publication supabase_realtime add table public.conversations; exception when duplicate_object then null; end;
-  begin alter publication supabase_realtime add table public.notifications; exception when duplicate_object then null; end;
+  -- wrong_object_type приходит, если публикация объявлена FOR ALL TABLES:
+  -- добавлять в неё таблицы нельзя, но они там и так уже есть.
+  begin alter publication supabase_realtime add table public.messages;      exception when duplicate_object or wrong_object_type then null; end;
+  begin alter publication supabase_realtime add table public.conversations; exception when duplicate_object or wrong_object_type then null; end;
+  begin alter publication supabase_realtime add table public.notifications; exception when duplicate_object or wrong_object_type then null; end;
 end $$;
 
 -- ═══════════════════════════════════════════════════════════════════
@@ -653,4 +691,9 @@ insert into public.communities (name, description, icon, kind) values
   ('Инкай',               'Сообщество сотрудников АО «СП «Инкай».',                                        'factory',  'dzo'),
   ('Байкен-U',            'Сообщество сотрудников АО «Байкен-U».',                                         'crane',    'dzo'),
   ('Катко',               'Сообщество сотрудников ТОО «СП «Катко».',                                       'hammer',   'dzo')
-on conflict (name) do nothing;
+-- do nothing оставлял бы у существующих сообществ знак 'gear' из значения
+-- по умолчанию: после обновления все группы выглядели одинаково.
+on conflict (name) do update
+  set icon        = excluded.icon,
+      kind        = excluded.kind,
+      description = coalesce(public.communities.description, excluded.description);

@@ -134,6 +134,10 @@ function Shell() {
     [tab, uid],
   )
 
+  // Нестабильная функция в этом пропе перезапускала эффект в Messages и
+  // слала второй запрос на открытие диалога при любом рендере App.
+  const clearChatWith = useCallback(() => setChatWith(null), [])
+
   const closeProfile = useCallback(() => {
     setViewProfile(null)
     setTab(returnTab)
@@ -241,7 +245,7 @@ function Shell() {
             onOpenProfile={openProfile}
             onUnreadChange={refreshCounts}
             startWith={chatWith}
-            onStartHandled={() => setChatWith(null)}
+            onStartHandled={clearChatWith}
           />
         )}
         {tab === 'activity' && (

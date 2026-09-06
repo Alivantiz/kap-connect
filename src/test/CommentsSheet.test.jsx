@@ -80,22 +80,22 @@ describe('Ответы', () => {
     await waitFor(() => expect(db.markSolution).toHaveBeenCalledWith('cm-1'))
   })
 
-  it('кнопка «Решение» скрыта в обычном посте и у чужого вопроса', async () => {
-    const { rerender } = view(postFixture({ type: 'post', author_id: 'me-1' }))
+  it('кнопка «Решение» видна автору вопроса', async () => {
+    view(postFixture({ type: 'question', author_id: 'me-1' }))
+    await screen.findByText('Проверьте зазор в подшипнике.')
+    expect(screen.getByRole('button', { name: /Решение/ })).toBeInTheDocument()
+  })
+
+  it('кнопка «Решение» скрыта в обычном посте', async () => {
+    view(postFixture({ type: 'post', author_id: 'me-1' }))
     await screen.findByText('Проверьте зазор в подшипнике.')
     expect(screen.queryByRole('button', { name: /Решение/ })).not.toBeInTheDocument()
+  })
 
-    rerender(
-      <CommentsSheet
-        post={postFixture({ type: 'question', author_id: 'other-9' })}
-        myId="me-1"
-        onClose={() => {}}
-        onOpenProfile={() => {}}
-      />,
-    )
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: /Решение/ })).not.toBeInTheDocument(),
-    )
+  it('кнопка «Решение» скрыта у чужого вопроса', async () => {
+    view(postFixture({ type: 'question', author_id: 'other-9' }))
+    await screen.findByText('Проверьте зазор в подшипнике.')
+    expect(screen.queryByRole('button', { name: /Решение/ })).not.toBeInTheDocument()
   })
 
   it('отмеченный ответ помечен значком', async () => {

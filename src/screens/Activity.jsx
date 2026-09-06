@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { listNotifications, markNotificationsRead } from '../lib/db'
 import { dzoCore, timeAgo, truncate } from '../lib/format'
 import { IconCheck, IconComment, IconEmptyBell, IconHeart, IconMessages } from '../components/Icons'
@@ -25,6 +25,10 @@ export default function Activity({ myId, onOpenProfile, onRead }) {
   const [items, setItems] = useState(null)
   const [filter, setFilter] = useState('all')
   const toast = useToast()
+  // Ссылка вместо зависимости: onRead приходит из App новой функцией на
+  // каждый рендер и иначе перезапускал бы загрузку вместе с UPDATE.
+  const onReadRef = useRef(onRead)
+  onReadRef.current = onRead
 
   // Загрузка и отметка прочитанного разделены. Раньше они были в одном
   // useCallback вместе с нестабильным onRead, поэтому каждый тик таймера
@@ -35,17 +39,16 @@ export default function Activity({ myId, onOpenProfile, onRead }) {
       if (!alive) return
       if (error) return toast.error(error)
       setItems(data || [])
+      // Отметка прочитанного идёт строго после списка: иначе непрочитанные
+      // подсвечивались через раз, в зависимости от того, какой запрос успел.
+      markNotificationsRead(myId).then((r) => {
+        if (alive && !r.error) onReadRef.current?.()
+      })
     })
     return () => {
       alive = false
     }
   }, [myId, toast])
-
-  useEffect(() => {
-    markNotificationsRead(myId).then(({ error }) => {
-      if (!error) onRead?.()
-    })
-  }, [myId, onRead])
 
   const openActor = useCallback(
     (id) => {
@@ -113,9 +116,9 @@ export default function Activity({ myId, onOpenProfile, onRead }) {
               </span>
             </span>
             <span className="notif-info">
-              <p className="notif-text">
+              <span className="notif-text">
                 <span className="notif-name">{actor?.full_name || 'Пользователь'}</span> {k.text}
-              </p>
+              </span>
               {n.post?.title && <span className="notif-post">«{truncate(n.post.title, 64)}»</span>}
               <span className="notif-meta">
                 {[dzoCore(actor?.dzo, 2), timeAgo(n.created_at)].filter(Boolean).join(' · ')}

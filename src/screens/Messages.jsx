@@ -7,6 +7,7 @@ import {
   searchPeopleByName,
   sendMessage,
   subscribeToMessages,
+  subscribeToMyConversations,
 } from '../lib/db'
 import { dateLabel, dzoCore, timeAgo, timeExact } from '../lib/format'
 import {
@@ -51,6 +52,10 @@ export default function Messages({
   useEffect(() => {
     load()
   }, [load])
+
+  // Без подписки список не обновлялся: входящее сообщение не меняло превью
+  // и не поднимало диалог наверх, пока экран не перемонтируют.
+  useEffect(() => subscribeToMyConversations(myId, load), [myId, load])
 
   const other = useCallback((c) => (c.user1_id === myId ? c.p2 : c.p1), [myId])
 

@@ -28,7 +28,9 @@ export default function Avatar({ name, size = 40, onClick, expert = false, class
   ) : (
     // span, а не div: аватар часто лежит внутри <button> строки списка,
     // а кнопка по спецификации может содержать только строчное содержимое.
-    <span className={`ava ${className}`} style={style} role="img" aria-label={label}>
+    // aria-hidden: имя уже читается из текста строки, иначе скринридер
+    // произносил его дважды подряд.
+    <span className={`ava ${className}`} style={style} aria-hidden="true">
       {content}
     </span>
   )

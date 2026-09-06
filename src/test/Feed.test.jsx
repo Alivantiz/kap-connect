@@ -151,6 +151,20 @@ describe('Лента', () => {
     expect(screen.getByRole('button', { name: 'Свернуть' })).toBeInTheDocument()
   })
 
+  it('сообщает, если удаление не прошло, и оставляет карточку', async () => {
+    // Удаление без ответа строк раньше молча «удаляло» карточку из списка.
+    db.listFeed.mockResolvedValue({ data: [postFixture({ author_id: 'me-1' })], error: null })
+    db.deletePost.mockReturnValue(fail('Недостаточно прав для этого действия'))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { user } = view()
+    await screen.findByText('Замена уплотнения насоса ГрАТ')
+
+    await user.click(screen.getByRole('button', { name: 'Удалить публикацию' }))
+
+    expect(await screen.findByText('Недостаточно прав для этого действия')).toBeInTheDocument()
+    expect(screen.getByText('Замена уплотнения насоса ГрАТ')).toBeInTheDocument()
+  })
+
   it('кнопка удаления есть только у своей публикации', async () => {
     db.listFeed.mockResolvedValue({ data: [postFixture({ author_id: 'me-1' })], error: null })
     view()
