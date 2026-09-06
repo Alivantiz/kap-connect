@@ -17,6 +17,7 @@ import EmptyState from '../components/ui/EmptyState'
 import { RowSkeleton } from '../components/ui/Skeleton'
 import { TextField, TextArea, Field } from '../components/ui/Field'
 import { useToast } from '../components/ui/toast-context'
+import { useConfirm } from '../components/ui/confirm-context'
 
 const KINDS = [
   { value: 'specialty', label: 'По специальности' },
@@ -37,6 +38,7 @@ export default function Communities({ myId }) {
   const [mine, setMine] = useState(() => new Set())
   const [form, setForm] = useState(null)
   const toast = useToast()
+  const confirm = useConfirm()
   const busy = useRef(new Set())
 
   const load = useCallback(async () => {
@@ -92,7 +94,13 @@ export default function Communities({ myId }) {
   }
 
   const remove = async (c) => {
-    if (!window.confirm(`Удалить сообщество «${c.name}»? Участники потеряют к нему доступ.`)) return
+    const yes = await confirm({
+      title: 'Удалить сообщество?',
+      text: `Участники «${c.name}» потеряют к нему доступ.`,
+      action: 'Удалить',
+      danger: true,
+    })
+    if (!yes) return
     const { error } = await deleteCommunity(c.id)
     if (error) return toast.error(error)
     toast.success('Сообщество удалено')

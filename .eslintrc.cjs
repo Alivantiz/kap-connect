@@ -10,7 +10,7 @@ module.exports = {
   parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
   settings: { react: { version: '18.3' } },
   plugins: ['react-refresh'],
-  ignorePatterns: ['dist', 'node_modules', 'coverage'],
+  ignorePatterns: ['dist', 'demo-dist', 'node_modules', 'coverage'],
   rules: {
     'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     'no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
@@ -21,7 +21,8 @@ module.exports = {
   },
   overrides: [
     {
-      files: ['src/test/**/*.{js,jsx}'],
+      files: ['src/test/**/*.{js,jsx}', 'demo/**/*.{js,jsx}'],
+      rules: { 'react-refresh/only-export-components': 'off' },
       globals: { vi: 'readonly', describe: 'readonly', it: 'readonly', expect: 'readonly', beforeEach: 'readonly', afterEach: 'readonly' },
     },
   ],

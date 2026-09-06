@@ -30,3 +30,4 @@ pnpm-debug.log*
 # supabase local
 supabase/.branches/
 supabase/.temp/
+demo-dist

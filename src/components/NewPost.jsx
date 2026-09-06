@@ -6,6 +6,7 @@ import Sheet from './ui/Sheet'
 import Button from './ui/Button'
 import { TextField, TextArea } from './ui/Field'
 import { useToast } from './ui/toast-context'
+import { useConfirm } from './ui/confirm-context'
 
 const TYPES = [
   {
@@ -39,6 +40,7 @@ export default function NewPost({ myId, onClose, onPosted }) {
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
   const toast = useToast()
+  const confirm = useConfirm()
 
   const active = TYPES.find((t) => t.key === type)
 
@@ -70,10 +72,16 @@ export default function NewPost({ myId, onClose, onPosted }) {
     onPosted()
   }
 
-  const close = () => {
+  const close = async () => {
     const dirty = title.trim() || body.trim() || tags.trim()
-    if (dirty && !window.confirm('Закрыть без публикации? Черновик не сохранится.')) return
-    onClose()
+    if (!dirty) return onClose()
+    const yes = await confirm({
+      title: 'Закрыть без публикации?',
+      text: 'Черновик не сохранится.',
+      action: 'Закрыть',
+      danger: true,
+    })
+    if (yes) onClose()
   }
 
   return (

@@ -8,6 +8,7 @@ import EmptyState from '../components/ui/EmptyState'
 import { FeedSkeleton } from '../components/ui/Skeleton'
 import Button from '../components/ui/Button'
 import { useToast } from '../components/ui/toast-context'
+import { useConfirm } from '../components/ui/confirm-context'
 
 const PAGE = 30
 
@@ -20,6 +21,7 @@ export default function Feed({ myId, myProfile, onOpenProfile, onNeedProfile }) 
   const [done, setDone] = useState(false)
   const [openPost, setOpenPost] = useState(null)
   const toast = useToast()
+  const confirm = useConfirm()
 
   // Лайки нельзя отправлять параллельно по одному посту: быстрый двойной тап
   // раньше давал гонку INSERT/DELETE и счётчик расходился с базой навсегда.
@@ -131,7 +133,13 @@ export default function Feed({ myId, myProfile, onOpenProfile, onNeedProfile }) 
   }
 
   const remove = async (post) => {
-    if (!window.confirm(`Удалить публикацию «${post.title}»?`)) return
+    const yes = await confirm({
+      title: 'Удалить публикацию?',
+      text: `«${post.title}» и все ответы к ней будут удалены безвозвратно.`,
+      action: 'Удалить',
+      danger: true,
+    })
+    if (!yes) return
     const { error: e } = await deletePost(post.id)
     if (e) return toast.error(e)
     setPosts((prev) => prev.filter((p) => p.id !== post.id))

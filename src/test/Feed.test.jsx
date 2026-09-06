@@ -155,11 +155,12 @@ describe('Лента', () => {
     // Удаление без ответа строк раньше молча «удаляло» карточку из списка.
     db.listFeed.mockResolvedValue({ data: [postFixture({ author_id: 'me-1' })], error: null })
     db.deletePost.mockReturnValue(fail('Недостаточно прав для этого действия'))
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const { user } = view()
     await screen.findByText('Замена уплотнения насоса ГрАТ')
 
     await user.click(screen.getByRole('button', { name: 'Удалить публикацию' }))
+    // Подтверждение — собственное окно приложения, а не системный диалог
+    await user.click(await screen.findByRole('button', { name: 'Удалить' }))
 
     expect(await screen.findByText('Недостаточно прав для этого действия')).toBeInTheDocument()
     expect(screen.getByText('Замена уплотнения насоса ГрАТ')).toBeInTheDocument()

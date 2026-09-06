@@ -1,0 +1,36 @@
+/* Плашка демонстрации. Держится над нижней навигацией и не смещает вёрстку. */
+.demo-note {
+  position: fixed;
+  z-index: 70;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--nav-h) + var(--safe-b) + var(--s-3));
+  width: min(calc(100% - 32px), 440px);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  padding: 10px 8px 10px 13px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line-strong);
+  background: var(--bg-sheet);
+  box-shadow: var(--e-4);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+  animation: toast-in var(--d-base) var(--e-decel);
+}
+
+.demo-note button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+}
+.demo-note button:hover {
+  color: var(--text);
+  background: var(--bg-raised);
+}

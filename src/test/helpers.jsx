@@ -1,6 +1,7 @@
 import { render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ToastProvider } from '../components/ui/Toast'
+import { ConfirmProvider } from '../components/ui/Confirm'
 
 /**
  * Рендер с провайдером уведомлений — его требуют почти все экраны.
@@ -8,9 +9,15 @@ import { ToastProvider } from '../components/ui/Toast'
  * иначе rerender подменяет всё дерево и компонент перемонтируется,
  * что делает проверки на повторные запросы бессмысленными.
  */
+const Providers = ({ children }) => (
+  <ToastProvider>
+    <ConfirmProvider>{children}</ConfirmProvider>
+  </ToastProvider>
+)
+
 export function renderApp(ui, options = {}) {
   const user = userEvent.setup()
-  const result = render(ui, { wrapper: ToastProvider, ...options })
+  const result = render(ui, { wrapper: Providers, ...options })
   return { user, ...result }
 }
 

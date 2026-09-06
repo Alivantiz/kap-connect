@@ -27,6 +27,7 @@ import NewPost from './components/NewPost'
 import Avatar from './components/ui/Avatar'
 import Spinner from './components/ui/Spinner'
 import { ToastProvider } from './components/ui/Toast'
+import { ConfirmProvider } from './components/ui/Confirm'
 import { useToast } from './components/ui/toast-context'
 
 const TABS = [
@@ -40,7 +41,9 @@ const TABS = [
 export default function App() {
   return (
     <ToastProvider>
-      <Shell />
+      <ConfirmProvider>
+        <Shell />
+      </ConfirmProvider>
     </ToastProvider>
   )
 }
@@ -158,14 +161,29 @@ function Shell() {
 
   useEffect(() => {
     const g = nav.current
-    if (layers > prevLayers.current) {
-      window.history.pushState({ kap: layers }, '')
-    } else if (layers < prevLayers.current) {
+    try {
+      if (layers > prevLayers.current) {
+        window.history.pushState({ kap: layers }, '')
+        prevLayers.current = layers
+        return
+      }
+    } catch {
+      // Safari в приватном режиме ограничивает число вызовов pushState,
+      // а встроенный фрейм может запрещать их вовсе. Навигация по слоям
+      // тогда работает без истории, а не падает.
+      prevLayers.current = layers
+      return
+    }
+    if (layers < prevLayers.current) {
       if (g.fromPop) {
         g.fromPop = false // запись уже снял сам браузер
       } else {
         g.skipPop = true
-        window.history.back()
+        try {
+          window.history.back()
+        } catch {
+          g.skipPop = false
+        }
       }
     }
     prevLayers.current = layers
